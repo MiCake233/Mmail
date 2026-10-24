@@ -13,7 +13,7 @@ Prebuilt binaries are attached to the [releases](https://github.com/MiCake233/Mm
 
 - **Windows** — `Mmail-<version>-win-x64.zip`: portable, no installer. Unpack and run `Mmail.exe`.
 - **macOS** — best-effort only. A macOS package is published when convenient, so its version may lag behind the other platforms. If the latest release has none, look at earlier releases.
-- **Linux** — `Mmail-<version>-linux-<arch>.AppImage` and `.deb`.
+- **Linux** — built on demand only; packages may lag behind the Windows and Android builds.
 - **Android** — `Mmail-<version>-android.apk`: debug-signed, sideload only.
 
 All builds are beta. The Android package runs the same interface as the desktop and web builds;
@@ -59,7 +59,7 @@ Mail alerts depend on third-party IMAP servers and on network conditions outside
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | installer, portable zip | Run key (`HKCU\…\Run`) | Tray, native notifications, taskbar badge |
 | macOS 12+ (arm64 / x64) | dmg, zip | Login Items | Best-effort builds; version may lag behind. Unsigned, allow on first launch |
-| Linux x64 | AppImage, deb | XDG autostart entry (`~/.config/autostart/mmail.desktop`) | Needs libsecret for credential encryption, libnotify for notifications, libappindicator for the tray |
+| Linux x64 | AppImage, deb (on demand) | XDG autostart entry (`~/.config/autostart/mmail.desktop`) | Best-effort builds; needs libsecret, libnotify and libappindicator |
 | Android 7+ | apk | — | WebView shell; alerts are desktop-only |
 
 On Linux without a Secret Service (gnome-keyring or KWallet), Electron cannot encrypt the IMAP
@@ -182,7 +182,7 @@ npm run dist        # electron-builder: zip / dmg / AppImage / deb into release/
 - The embedded browser cannot pass proxy credentials; authenticated proxies work for IMAP only.
 
 - The embedded browser is desktop-only; the web and Android builds hand links to the system browser.
-- macOS packages are built on a best-effort basis and may lag behind Windows, Linux and Android.
+- Only Windows and Android are published per release. macOS and Linux targets exist and build on demand, so their packages may lag behind.
 - Google and Microsoft may block sign-in inside the embedded view; use the system-browser action for those accounts.
 
 - The Android target is a WebView shell. Background mail alerts are not implemented; the UI states that alerts require the desktop build.
@@ -214,7 +214,7 @@ Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方�
 
 - **Windows** — `Mmail-<version>-win-x64.zip`：便携版，无需安装，解压后运行 `Mmail.exe`。
 - **macOS** — 仅在条件允许时发布。macOS 包按需构建，版本可能落后于其他平台；若最新版没有，可查看较早的 Release。
-- **Linux** — `Mmail-<version>-linux-<arch>.AppImage` 与 `.deb`。
+- **Linux** — 仅在条件允许时构建；版本可能落后于 Windows 与 Android。
 - **Android** — `Mmail-<version>-android.apk`：调试签名，需手动安装。
 
 所有构建均为测试版。安卓包与桌面版、网页版使用同一套界面；后台收件提醒尚未包含在内（见下文“安卓端”）。
@@ -258,7 +258,7 @@ macOS 包未签名、未公证。首次打开请在右键菜单中选择「打�
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | 安装包、便携版 zip | 注册表 Run 项 | 托盘、系统通知、任务栏角标 |
 | macOS 12+（arm64 / x64） | dmg、zip | 登录项（Login Items） | 按需构建，版本可能落后；未签名，首次需放行 |
-| Linux x64 | AppImage、deb | XDG 自启动项（`~/.config/autostart/mmail.desktop`） | 凭据加密需 libsecret，通知需 libnotify，托盘需 libappindicator |
+| Linux x64 | AppImage、deb（按需） | XDG 自启动项（`~/.config/autostart/mmail.desktop`） | 按需构建；依赖 libsecret、libnotify、libappindicator |
 | Android 7+ | apk | — | WebView 外壳，收件提醒仅桌面版 |
 
 Linux 上若没有 Secret Service（gnome-keyring 或 KWallet），Electron 无法加密 IMAP 授权码。
@@ -349,7 +349,7 @@ npm run dist        # 使用 electron-builder 产出 zip / dmg / AppImage / deb 
 - 内置浏览器无法传代理凭据；需要认证的代理仅对 IMAP 生效。
 
 - 内置浏览器仅桌面版可用；网页版与安卓版仍交给系统浏览器。
-- macOS 包按条件构建，版本可能落后于 Windows、Linux 与 Android。
+- 每个版本只发布 Windows 与 Android；macOS 与 Linux 目标保留但按需构建，版本可能落后。
 - Google 与微软可能拒绝内嵌视图内的登录，这类账号请改用系统浏览器。
 
 - 安卓端为 WebView 外壳，后台收件提醒尚未实现，界面会明确提示需要桌面版。

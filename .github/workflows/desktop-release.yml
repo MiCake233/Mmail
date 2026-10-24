@@ -3,9 +3,11 @@ name: desktop-release
 on:
   workflow_dispatch:
 
-# macOS is deliberately not part of this matrix: its packages are published on
-# a best-effort basis and may lag behind the other platforms. To build one, add
-# an entry (os: macos-latest, args: '--mac --x64 --arm64') and run the workflow.
+# Only Windows is built here. macOS and Linux targets remain in the
+# electron-builder configuration and are built on demand: add a matrix entry such as
+#   os: macos-latest, name: macos, args: '--mac --x64 --arm64'
+#   os: ubuntu-latest, name: linux, args: ''
+# and run the workflow.
 jobs:
   build:
     strategy:
@@ -14,9 +16,6 @@ jobs:
         include:
           - os: windows-latest
             name: windows
-            args: ''
-          - os: ubuntu-latest
-            name: linux
             args: ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
