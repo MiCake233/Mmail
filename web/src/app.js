@@ -826,7 +826,7 @@
   }
 
   function renderAboutTab() {
-    const version = state.desktop.appVersion || '0.1.0-beta.3';
+    const version = state.desktop.appVersion || '0.1.0-beta.4';
     return (
       '<div class="field">' +
         '<div class="field-label">Mmail</div>' +
@@ -1127,11 +1127,16 @@
     });
 
     els.filters.addEventListener('click', (event) => {
-      const chip = event.target.closest('.chip');
-      if (!chip) return;
-      state.filter = chip.dataset.filter || 'all';
+      const tab = event.target.closest('[data-filter]');
+      if (!tab) return;
+      const next = tab.dataset.filter || 'all';
+      if (next === state.filter) return;
+      state.filter = next;
       renderChips();
       renderContent();
+      /* Re-rendering replaces the buttons; keep the keyboard focus on the tab. */
+      const active = els.filters.querySelector('[data-filter="' + next + '"]');
+      if (active) active.focus({ preventScroll: true });
     });
 
     els.content.addEventListener('click', (event) => {

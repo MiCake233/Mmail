@@ -1,6 +1,6 @@
 # Mmail
 
-**Status: beta** · version `0.1.0-beta.3` · MIT
+**Status: beta** · version `0.1.0-beta.4` · MIT
 
 A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstream mail providers into one searchable page, and can optionally poll a mailbox over IMAP and raise a desktop notification. It ships as an Electron desktop application, a static web build, and an Android shell.
 
@@ -170,7 +170,7 @@ MIT. See [LICENSE](./LICENSE).
 
 # 中文简介
 
-**状态：测试版（beta）** · 版本 `0.1.0-beta.3` · MIT
+**状态：测试版（beta）** · 版本 `0.1.0-beta.4` · MIT
 
 Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方登录页汇总到一页，可搜索、可筛选；桌面版可选地通过 IMAP 轮询收件箱并弹出系统通知。项目同时提供 Electron 桌面应用、静态网页版与安卓外壳。
 
