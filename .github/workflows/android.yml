@@ -21,16 +21,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      # The runner image already ships the Android SDK; setup-android@v3 is not
+      # used because it still tries to install the retired "tools" package.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
 
-      - name: Accept SDK licences
-        run: yes | sdkmanager --licenses > /dev/null || true
+      - name: Show SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/build-tools" || true
 
       - name: Build debug APK
         working-directory: android
-        run: |
-          gradle wrapper --gradle-version 8.7
-          ./gradlew assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace --console=plain
 
       - uses: actions/upload-artifact@v4
         with:
