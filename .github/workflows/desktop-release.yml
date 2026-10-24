@@ -3,6 +3,9 @@ name: desktop-release
 on:
   workflow_dispatch:
 
+# macOS is deliberately not part of this matrix: its packages are published on
+# a best-effort basis and may lag behind the other platforms. To build one, add
+# an entry (os: macos-latest, args: '--mac --x64 --arm64') and run the workflow.
 jobs:
   build:
     strategy:
@@ -12,9 +15,6 @@ jobs:
           - os: windows-latest
             name: windows
             args: ''
-          - os: macos-latest
-            name: macos
-            args: '--mac --x64 --arm64'
           - os: ubuntu-latest
             name: linux
             args: ''

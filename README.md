@@ -12,7 +12,7 @@ A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstr
 Prebuilt binaries are attached to the [releases](https://github.com/MiCake233/Mmail/releases):
 
 - **Windows** — `Mmail-<version>-win-x64.zip`: portable, no installer. Unpack and run `Mmail.exe`.
-- **macOS** — `Mmail-<version>-mac-<arch>.dmg` and `.zip`: unsigned build, see the note below.
+- **macOS** — best-effort only. A macOS package is published when convenient, so its version may lag behind the other platforms. If the latest release has none, look at earlier releases.
 - **Linux** — `Mmail-<version>-linux-<arch>.AppImage` and `.deb`.
 - **Android** — `Mmail-<version>-android.apk`: debug-signed, sideload only.
 
@@ -52,7 +52,7 @@ Mail alerts depend on third-party IMAP servers and on network conditions outside
 | Platform | Package | Launch at login | Notes |
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | portable zip | Run key (`HKCU\…\Run`) | Tray, native notifications |
-| macOS 12+ (arm64 / x64) | dmg, zip | Login Items | Unsigned; allow on first launch |
+| macOS 12+ (arm64 / x64) | dmg, zip | Login Items | Best-effort builds; version may lag behind. Unsigned, allow on first launch |
 | Linux x64 | AppImage, deb | XDG autostart entry (`~/.config/autostart/mmail.desktop`) | Needs libsecret for credential encryption, libnotify for notifications, libappindicator for the tray |
 | Android 7+ | apk | — | WebView shell; alerts are desktop-only |
 
@@ -165,6 +165,7 @@ npm run dist        # electron-builder: zip / dmg / AppImage / deb into release/
 ## Known limitations
 
 - The embedded browser is desktop-only; the web and Android builds hand links to the system browser.
+- macOS packages are built on a best-effort basis and may lag behind Windows, Linux and Android.
 - Google and Microsoft may block sign-in inside the embedded view; use the system-browser action for those accounts.
 
 - The Android target is a WebView shell. Background mail alerts are not implemented; the UI states that alerts require the desktop build.
@@ -195,7 +196,7 @@ Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方�
 预编译版本见 [Releases](https://github.com/MiCake233/Mmail/releases)：
 
 - **Windows** — `Mmail-<version>-win-x64.zip`：便携版，无需安装，解压后运行 `Mmail.exe`。
-- **macOS** — `Mmail-<version>-mac-<arch>.dmg` 与 `.zip`：未签名版本，见下方说明。
+- **macOS** — 仅在条件允许时发布。macOS 包按需构建，版本可能落后于其他平台；若最新版没有，可查看较早的 Release。
 - **Linux** — `Mmail-<version>-linux-<arch>.AppImage` 与 `.deb`。
 - **Android** — `Mmail-<version>-android.apk`：调试签名，需手动安装。
 
@@ -233,7 +234,7 @@ macOS 包未签名、未公证。首次打开请在右键菜单中选择「打�
 | 平台 | 安装包 | 开机自启动 | 说明 |
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | 便携版 zip | 注册表 Run 项 | 托盘、系统通知 |
-| macOS 12+（arm64 / x64） | dmg、zip | 登录项（Login Items） | 未签名，首次需放行 |
+| macOS 12+（arm64 / x64） | dmg、zip | 登录项（Login Items） | 按需构建，版本可能落后；未签名，首次需放行 |
 | Linux x64 | AppImage、deb | XDG 自启动项（`~/.config/autostart/mmail.desktop`） | 凭据加密需 libsecret，通知需 libnotify，托盘需 libappindicator |
 | Android 7+ | apk | — | WebView 外壳，收件提醒仅桌面版 |
 
@@ -314,6 +315,7 @@ npm run dist        # 使用 electron-builder 产出 zip / dmg / AppImage / deb 
 ## 已知限制
 
 - 内置浏览器仅桌面版可用；网页版与安卓版仍交给系统浏览器。
+- macOS 包按条件构建，版本可能落后于 Windows、Linux 与 Android。
 - Google 与微软可能拒绝内嵌视图内的登录，这类账号请改用系统浏览器。
 
 - 安卓端为 WebView 外壳，后台收件提醒尚未实现，界面会明确提示需要桌面版。
