@@ -648,6 +648,10 @@
         ? t('settings.mail.result', { count: account.lastCheck.unread || 0 })
         : errorText(account.lastCheck.error)
       : t('mail.never');
+    const insecure =
+      account.encrypted === false
+        ? '<span class="account-warn">' + esc(t('settings.mail.noKeyring')) + '</span>'
+        : '';
 
     return (
       '<li class="account" data-id="' + esc(account.id) + '">' +
@@ -655,6 +659,7 @@
         '<span class="account-meta">' +
           '<span class="account-email">' + esc(account.email) + '</span>' +
           '<span class="account-sub">' + esc(result) + '</span>' +
+          insecure +
         '</span>' +
         '<button class="ghost-btn ghost-btn--sm" type="button" data-act="remove-account" data-id="' + esc(account.id) + '">' +
           esc(t('settings.mail.remove')) +

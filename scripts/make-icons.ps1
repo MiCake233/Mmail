@@ -150,6 +150,13 @@ $icon192 = New-IconBitmap -Size 192
 Save-Png -Bitmap $icon192 -Path (Join-Path $webAssets 'icon-192.png')
 $icon192.Dispose()
 
+# electron-builder build resource: a single 1024px PNG, converted per platform
+$buildDir = Join-Path $root "build"
+if (-not (Test-Path $buildDir)) { New-Item -ItemType Directory -Path $buildDir -Force | Out-Null }
+$icon1024 = New-IconBitmap -Size 1024
+Save-Png -Bitmap $icon1024 -Path (Join-Path $buildDir "icon.png")
+$icon1024.Dispose()
+
 # Windows .ico for the shortcut and installer: 16/32/48/256 PNG frames
 Write-IcoFile -Path (Join-Path $assets 'icon.ico') -Sizes @(16, 32, 48, 256)
 Write-Host ('  wrote ' + (Join-Path $assets 'icon.ico'))

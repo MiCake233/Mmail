@@ -1,6 +1,6 @@
 # Mmail
 
-**Status: beta** · version `0.1.0-beta.2` · MIT
+**Status: beta** · version `0.1.0-beta.3` · MIT
 
 A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstream mail providers into one searchable page, and can optionally poll a mailbox over IMAP and raise a desktop notification. It ships as an Electron desktop application, a static web build, and an Android shell.
 
@@ -12,10 +12,16 @@ A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstr
 Prebuilt binaries are attached to the [releases](https://github.com/MiCake233/Mmail/releases):
 
 - **Windows** — `Mmail-<version>-win-x64.zip`: portable, no installer. Unpack and run `Mmail.exe`.
+- **macOS** — `Mmail-<version>-mac-<arch>.dmg` and `.zip`: unsigned build, see the note below.
+- **Linux** — `Mmail-<version>-linux-<arch>.AppImage` and `.deb`.
 - **Android** — `Mmail-<version>-android.apk`: debug-signed, sideload only.
 
-Both are beta builds. The Android package runs the same interface as the desktop and web builds;
+All builds are beta. The Android package runs the same interface as the desktop and web builds;
 background mail alerts are not part of it yet (see the Android section below).
+
+The macOS package is not signed or notarised. On first launch, open it from the context menu
+(*Open*) or allow it in *System Settings → Privacy & Security*. Without a Developer ID the
+Gatekeeper warning cannot be avoided honestly.
 
 ## Scope and legal position
 
@@ -39,6 +45,19 @@ Mail alerts depend on third-party IMAP servers and on network conditions outside
 - Desktop: tray residency, launch at login, native notifications that open the provider's webmail on click.
 - Keyboard: `/` focuses search, `↑` / `↓` moves between entries, `Enter` opens, `Esc` closes panels.
 - Web build: static files; a service worker caches the shell so the launcher opens offline.
+
+## Platform support
+
+| Platform | Package | Launch at login | Notes |
+| --- | --- | --- | --- |
+| Windows 10/11 x64 | portable zip | Run key (`HKCU\…\Run`) | Tray, native notifications |
+| macOS 12+ (arm64 / x64) | dmg, zip | Login Items | Unsigned; allow on first launch |
+| Linux x64 | AppImage, deb | XDG autostart entry (`~/.config/autostart/mmail.desktop`) | Needs libsecret for credential encryption, libnotify for notifications, libappindicator for the tray |
+| Android 7+ | apk | — | WebView shell; alerts are desktop-only |
+
+On Linux without a Secret Service (gnome-keyring or KWallet), Electron cannot encrypt the IMAP
+credential. Mmail then stores it Base64-encoded and flags the account in the settings list;
+install `libsecret` and a keyring to avoid that fallback.
 
 ## Requirements
 
@@ -125,6 +144,7 @@ npm run test:imap   # IMAP client regression test against a local fake server
 npm run test:store  # storage and OS-encryption smoke test, runs inside Electron
 npm run icons       # regenerate icons from assets/icon-source.jpg
 npm run build:win   # assemble dist/Mmail-<version>-win-x64.zip (portable)
+npm run dist        # electron-builder: zip / dmg / AppImage / deb into release/
 ```
 
 `npm run check` also fails when a source comment is not in English. Locale data (`locales.js`, the `zh` tables in `electron/strings.js`) is exempt.
@@ -150,7 +170,7 @@ MIT. See [LICENSE](./LICENSE).
 
 # 中文简介
 
-**状态：测试版（beta）** · 版本 `0.1.0-beta.2` · MIT
+**状态：测试版（beta）** · 版本 `0.1.0-beta.3` · MIT
 
 Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方登录页汇总到一页，可搜索、可筛选；桌面版可选地通过 IMAP 轮询收件箱并弹出系统通知。项目同时提供 Electron 桌面应用、静态网页版与安卓外壳。
 
@@ -159,9 +179,14 @@ Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方�
 预编译版本见 [Releases](https://github.com/MiCake233/Mmail/releases)：
 
 - **Windows** — `Mmail-<version>-win-x64.zip`：便携版，无需安装，解压后运行 `Mmail.exe`。
+- **macOS** — `Mmail-<version>-mac-<arch>.dmg` 与 `.zip`：未签名版本，见下方说明。
+- **Linux** — `Mmail-<version>-linux-<arch>.AppImage` 与 `.deb`。
 - **Android** — `Mmail-<version>-android.apk`：调试签名，需手动安装。
 
-两者均为测试版。安卓包与桌面版、网页版使用同一套界面；后台收件提醒尚未包含在内（见下文“安卓端”）。
+所有构建均为测试版。安卓包与桌面版、网页版使用同一套界面；后台收件提醒尚未包含在内（见下文“安卓端”）。
+
+macOS 包未签名、未公证。首次打开请在右键菜单中选择「打开」，或在「系统设置 → 隐私与安全性」中放行。
+没有 Developer ID 的情况下，Gatekeeper 提示无法回避。
 
 ## 范围与法律定位
 
@@ -185,6 +210,18 @@ Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方�
 - 桌面版：托盘常驻、开机自启动、系统通知（点击通知打开对应邮箱网页）。
 - 键盘：`/` 聚焦搜索，`↑` / `↓` 在条目间移动，`Enter` 打开，`Esc` 关闭面板。
 - 网页版：纯静态文件，Service Worker 缓存外壳以支持离线打开。
+
+## 平台支持
+
+| 平台 | 安装包 | 开机自启动 | 说明 |
+| --- | --- | --- | --- |
+| Windows 10/11 x64 | 便携版 zip | 注册表 Run 项 | 托盘、系统通知 |
+| macOS 12+（arm64 / x64） | dmg、zip | 登录项（Login Items） | 未签名，首次需放行 |
+| Linux x64 | AppImage、deb | XDG 自启动项（`~/.config/autostart/mmail.desktop`） | 凭据加密需 libsecret，通知需 libnotify，托盘需 libappindicator |
+| Android 7+ | apk | — | WebView 外壳，收件提醒仅桌面版 |
+
+Linux 上若没有 Secret Service（gnome-keyring 或 KWallet），Electron 无法加密 IMAP 授权码。
+此时 Mmail 以 Base64 保存，并在设置列表中标注该账号；安装 `libsecret` 与密钥环即可避免。
 
 ## 安装与运行
 
@@ -240,6 +277,7 @@ npm run test:imap   # IMAP 客户端回归测试（本地假服务器）
 npm run test:store  # 存储与系统加密冒烟测试（在 Electron 内运行）
 npm run icons       # 从 assets/icon-source.jpg 重新生成图标
 npm run build:win   # 生成 dist/Mmail-<version>-win-x64.zip（便携版）
+npm run dist        # 使用 electron-builder 产出 zip / dmg / AppImage / deb 到 release/
 ```
 
 `npm run check` 在源码注释不是英文时会失败；语言数据（`locales.js`、`electron/strings.js` 中的 `zh` 表）除外。

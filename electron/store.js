@@ -141,6 +141,8 @@ class Store {
       host: account.host,
       port: account.port,
       secure: account.secure !== false,
+      /* false when the OS keystore is unavailable and the secret fell back to Base64 */
+      encrypted: Boolean(account.secret && account.secret.enc === 'os'),
       lastCheck: account.lastCheck || null,
     };
   }

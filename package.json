@@ -1,10 +1,11 @@
 {
   "name": "mmail",
   "productName": "Mmail",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "private": true,
   "description": "Mmail — a launcher for mainstream mail sign-in pages with optional new-mail alerts. Beta.",
   "license": "MIT",
+  "author": "MiCake233",
   "homepage": "https://github.com/MiCake233/Mmail",
   "repository": {
     "type": "git",
@@ -19,12 +20,52 @@
     "test:imap": "node scripts/test-imap.mjs",
     "test:store": "electron scripts/test-store.js",
     "icons": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icons.ps1",
-    "build:win": "node scripts/build-win.mjs"
+    "build:win": "node scripts/build-win.mjs",
+    "dist": "electron-builder --publish never"
   },
   "engines": {
     "node": ">=18"
   },
   "devDependencies": {
-    "electron": "^45.0.0"
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.mmail.app",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "productName": "Mmail",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "web/**/*",
+      "assets/icon.png",
+      "assets/tray.png",
+      "package.json",
+      "LICENSE",
+      "README.md"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": ["zip"],
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": ["zip", "dmg"],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Utility",
+      "icon": "build/icon.png",
+      "maintainer": "MiCake233 <jaodephanie@gmail.com>"
+    }
   }
 }

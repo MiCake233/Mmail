@@ -16,6 +16,7 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
+const os = require('node:os');
 const { app, BrowserWindow, Tray, Menu, Notification, shell, ipcMain, nativeImage } = require('electron');
 
 const { Store, MAX_ACCOUNTS } = require('./store');
@@ -240,30 +241,76 @@ function updateTrayMenu() {
 /* ---------- Launch at login                                               */
 /* ------------------------------------------------------------------------- */
 
-/** In development electron.exe needs the app path; a packaged build does not. */
+/** In development the launcher needs the application path; a packaged build does not. */
 function loginItemArgs() {
   return app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden'];
 }
 
+function linuxAutostartFile() {
+  return path.join(os.homedir(), '.config', 'autostart', 'mmail.desktop');
+}
+
+function linuxExecLine() {
+  const suffix = app.isPackaged ? ' --hidden' : ' "' + app.getAppPath() + '" --hidden';
+  return '"' + process.execPath + '"' + suffix;
+}
+
+function setLinuxAutoStart(enabled) {
+  const file = linuxAutostartFile();
+  if (!enabled) {
+    fs.rmSync(file, { force: true });
+    return;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=Mmail',
+      'Comment=Mail sign-in launcher',
+      'Exec=' + linuxExecLine(),
+      'Terminal=false',
+      'X-GNOME-Autostart-enabled=true',
+      '',
+    ].join('\n'),
+    'utf8'
+  );
+}
+
 function setAutoStart(enabled) {
   store.setApp({ autoStart: Boolean(enabled) });
-  if (process.platform === 'linux') return;
   try {
-    app.setLoginItemSettings({
-      openAtLogin: Boolean(enabled),
-      openAsHidden: true,
-      path: process.execPath,
-      args: loginItemArgs(),
-    });
+    /* Linux has no login-item API; the XDG autostart entry is the portable route. */
+    if (process.platform === 'linux') {
+      setLinuxAutoStart(Boolean(enabled));
+      return;
+    }
+    const settings = { openAtLogin: Boolean(enabled) };
+    if (process.platform === 'darwin') {
+      settings.openAsHidden = true;
+    } else {
+      settings.path = process.execPath;
+      settings.args = loginItemArgs();
+    }
+    app.setLoginItemSettings(settings);
   } catch (err) {
     /* System policy may forbid the change; keep the stored value */
   }
 }
 
 function syncAutoStartFromSystem() {
-  if (process.platform === 'linux' || !app.isPackaged) return;
   try {
-    const info = app.getLoginItemSettings({ args: loginItemArgs() });
+    if (process.platform === 'linux') {
+      const enabled = fs.existsSync(linuxAutostartFile());
+      if (enabled !== Boolean(store.data.app.autoStart)) store.setApp({ autoStart: enabled });
+      return;
+    }
+    if (!app.isPackaged) return;
+    const info =
+      process.platform === 'darwin'
+        ? app.getLoginItemSettings()
+        : app.getLoginItemSettings({ args: loginItemArgs() });
     if (Boolean(info.openAtLogin) !== Boolean(store.data.app.autoStart)) {
       store.setApp({ autoStart: Boolean(info.openAtLogin) });
     }
@@ -490,7 +537,7 @@ function quitApp() {
 }
 
 async function start() {
-  app.setAppUserModelId('com.mmail.desktop');
+  if (process.platform === 'win32') app.setAppUserModelId('com.mmail.app');
 
   store = new Store();
   providers = loadProviders();

@@ -1159,6 +1159,12 @@ a {
   white-space: nowrap;
 }
 
+.account-warn {
+  display: block;
+  color: var(--warn);
+  font-size: 10.5px;
+}
+
 .account-form {
   display: flex;
   flex-direction: column;
