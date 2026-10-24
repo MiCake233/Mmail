@@ -11,10 +11,13 @@ jobs:
         include:
           - os: windows-latest
             name: windows
+            args: ''
           - os: macos-latest
             name: macos
+            args: '--mac --x64 --arm64'
           - os: ubuntu-latest
             name: linux
+            args: ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -31,7 +34,7 @@ jobs:
         run: npm run check
 
       - name: Package
-        run: npx electron-builder --publish never
+        run: npx electron-builder --publish never ${{ matrix.args }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
@@ -43,5 +46,4 @@ jobs:
             release/*.dmg
             release/*.AppImage
             release/*.deb
-            release/*.exe
           if-no-files-found: error
