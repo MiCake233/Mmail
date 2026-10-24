@@ -185,6 +185,32 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+    <section class="browser" id="browser" hidden>
+      <div class="browser-bar">
+        <button class="icon-btn" id="browser-back" type="button" data-i18n-aria="browser.back" aria-label="Back">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 6l-6 6 6 6" />
+          </svg>
+        </button>
+        <button class="icon-btn" id="browser-forward" type="button" data-i18n-aria="browser.forward" aria-label="Forward">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10 6l6 6-6 6" />
+          </svg>
+        </button>
+        <button class="icon-btn" id="browser-reload" type="button" data-i18n-aria="browser.reload" aria-label="Reload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 12a8 8 0 1 1-2.4-5.7" />
+            <path d="M20 4v4h-4" />
+          </svg>
+        </button>
+        <span class="browser-url" id="browser-url"></span>
+        <span class="browser-note" id="browser-note" hidden></span>
+        <button class="ghost-btn" id="browser-external" type="button" data-i18n="browser.external">Open in system browser</button>
+        <button class="ghost-btn" id="browser-close" type="button" data-i18n="browser.close">Close</button>
+      </div>
+      <div class="browser-surface" id="browser-surface"></div>
+    </section>
+
     <div class="modal" id="settings" hidden>
       <div class="modal-backdrop" data-close="1"></div>
       <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">

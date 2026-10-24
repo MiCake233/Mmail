@@ -53,6 +53,8 @@
     form: { providerId: '', email: '', secret: '', host: '', port: '', secure: true },
     testResult: null,
     ack: {},
+    openMode: 'inapp',
+    browser: { open: false, provider: '' },
   };
 
   let t = I18N.translator('zh');
@@ -604,6 +606,18 @@
         segmentedMarkup('data-theme-mode', themeOptions(), state.themeMode) +
       '</div>' +
       '<div class="field">' +
+        '<div class="field-label">' + esc(t('settings.general.openMode')) + '</div>' +
+        '<div class="field-desc">' + esc(t('settings.general.openModeDesc')) + '</div>' +
+        segmentedMarkup(
+          'data-open-mode',
+          [
+            { id: 'inapp', label: t('settings.general.openModeApp') },
+            { id: 'system', label: t('settings.general.openModeSystem') },
+          ],
+          state.openMode
+        ) +
+      '</div>' +
+      '<div class="field">' +
         '<div class="field-row">' +
           '<div>' +
             '<div class="field-label">' + esc(t('settings.general.autostart')) +
@@ -826,7 +840,7 @@
   }
 
   function renderAboutTab() {
-    const version = state.desktop.appVersion || '0.1.0-beta.4';
+    const version = state.desktop.appVersion || '0.1.0-beta.5';
     return (
       '<div class="field">' +
         '<div class="field-label">Mmail</div>' +
@@ -860,6 +874,7 @@
   }
 
   function openSettings(tab, options) {
+    closeBrowserScreen();
     lastFocused = document.activeElement;
     state.settingsTab = tab || 'general';
     state.busy = false;
@@ -1158,18 +1173,12 @@
         return;
       }
       const link = event.target.closest('[data-open]');
-      if (link) {
-        acknowledge(link.dataset.open);
-        recordOpen(link.dataset.open);
-      }
+      if (link) handleProviderOpen(link.dataset.open, event);
     });
 
     els.recentsList.addEventListener('click', (event) => {
       const link = event.target.closest('[data-open]');
-      if (link) {
-        acknowledge(link.dataset.open);
-        recordOpen(link.dataset.open);
-      }
+      if (link) handleProviderOpen(link.dataset.open, event);
     });
 
     els.settingsToggle.addEventListener('click', () => openSettings('general'));
@@ -1200,6 +1209,14 @@
       const themeButton = target.closest('[data-theme-mode]');
       if (themeButton) {
         applyThemeMode(themeButton.dataset.themeMode, true);
+        renderSettings();
+        return;
+      }
+
+      const modeButton = target.closest('[data-open-mode]');
+      if (modeButton) {
+        state.openMode = modeButton.dataset.openMode === 'system' ? 'system' : 'inapp';
+        writeRaw('mmail.openMode', state.openMode);
         renderSettings();
         return;
       }
@@ -1306,10 +1323,24 @@
       if (isSettingsOpen()) renderSettings();
     });
 
+    if (browserAvailable()) {
+      els.browserBack.addEventListener('click', () => bridge.browser.action('back'));
+      els.browserForward.addEventListener('click', () => bridge.browser.action('forward'));
+      els.browserReload.addEventListener('click', () => bridge.browser.action('reload'));
+      els.browserExternal.addEventListener('click', () => bridge.browser.action('external'));
+      els.browserClose.addEventListener('click', closeBrowserScreen);
+      window.addEventListener('resize', syncBrowserBounds);
+      if (bridge.browser.onState) bridge.browser.onState(applyBrowserState);
+    }
+
     els.mailCheck.addEventListener('click', checkNow);
     els.mailSetup.addEventListener('click', () => openSettings('mail', { add: true }));
 
     document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && state.browser.open) {
+        closeBrowserScreen();
+        return;
+      }
       if (event.key === 'Escape' && isSettingsOpen()) {
         closeSettings();
         return;
@@ -1369,6 +1400,80 @@
   /* ---------- Render pipeline                                          */
   /* ------------------------------------------------------------------ */
 
+  /* ------------------------------------------------------------------ */
+  /* ---------- Embedded browser                                         */
+  /* ------------------------------------------------------------------ */
+
+  /* Providers that commonly refuse OAuth inside an embedded browser. */
+  const EMBED_CAUTION = new Set(['gmail', 'outlook', 'm365', 'yahoo', 'icloud', 'proton']);
+
+  function browserAvailable() {
+    return Boolean(isDesktop && bridge && bridge.browser);
+  }
+
+  function browserSurfaceRect() {
+    if (!els.browserSurface) return null;
+    const rect = els.browserSurface.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  }
+
+  function syncBrowserBounds() {
+    if (!state.browser.open || !browserAvailable()) return;
+    const rect = browserSurfaceRect();
+    if (rect) bridge.browser.setBounds(rect);
+  }
+
+  function openBrowserScreen(provider) {
+    if (!browserAvailable()) return false;
+    state.browser = { open: true, provider: provider.id };
+    els.browser.hidden = false;
+    const caution = EMBED_CAUTION.has(provider.id);
+    els.browserNote.hidden = !caution;
+    els.browserNote.textContent = caution ? t('browser.caution') : '';
+    els.browserUrl.textContent = provider.url;
+    els.browserBack.disabled = true;
+    els.browserForward.disabled = true;
+    document.documentElement.classList.add('is-browsing');
+    syncBrowserBounds();
+    bridge.browser.open(provider.url, browserSurfaceRect());
+    return true;
+  }
+
+  function closeBrowserScreen() {
+    if (!state.browser.open) return;
+    state.browser = { open: false, provider: '' };
+    if (browserAvailable()) bridge.browser.close();
+    els.browser.hidden = true;
+    document.documentElement.classList.remove('is-browsing');
+  }
+
+  function handleProviderOpen(id, event) {
+    const provider = providerById.get(id);
+    acknowledge(id);
+    recordOpen(id);
+    if (provider && state.openMode === 'inapp' && browserAvailable()) {
+      if (event) event.preventDefault();
+      openBrowserScreen(provider);
+    }
+  }
+
+  function applyBrowserState(next) {
+    if (!next) return;
+    if (!next.open) {
+      closeBrowserScreen();
+      return;
+    }
+    els.browserUrl.textContent = next.url || '';
+    els.browserUrl.title = next.title || next.url || '';
+    els.browserBack.disabled = !next.canGoBack;
+    els.browserForward.disabled = !next.canGoForward;
+  }
+
   function renderAll() {
     applyStaticI18n();
     renderPageHead();
@@ -1401,6 +1506,15 @@
     els.mailbarText = $('#mailbar-text');
     els.mailCheck = $('#mail-check');
     els.mailSetup = $('#mail-setup');
+    els.browser = $('#browser');
+    els.browserUrl = $('#browser-url');
+    els.browserNote = $('#browser-note');
+    els.browserBack = $('#browser-back');
+    els.browserForward = $('#browser-forward');
+    els.browserReload = $('#browser-reload');
+    els.browserClose = $('#browser-close');
+    els.browserExternal = $('#browser-external');
+    els.browserSurface = $('#browser-surface');
 
     if (!els.q || !els.content) return;
 
@@ -1417,6 +1531,7 @@
     state.recent = readJson(STORE.recent, []).filter(knownId).slice(0, LIMITS.recent);
     const ack = readJson('mmail.ack', {});
     state.ack = ack && typeof ack === 'object' ? ack : {};
+    state.openMode = readRaw('mmail.openMode', 'inapp') === 'system' ? 'system' : 'inapp';
 
     const history = readJson(STORE.history, {});
     state.history = {};

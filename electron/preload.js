@@ -29,6 +29,19 @@ contextBridge.exposeInMainWorld('mmail', {
 
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
 
+  /** Embedded browser: separate sandboxed webContents hosted by the window. */
+  browser: {
+    open: (url, bounds) => ipcRenderer.invoke('browser:open', url, bounds),
+    close: () => ipcRenderer.invoke('browser:close'),
+    setBounds: (bounds) => ipcRenderer.invoke('browser:set-bounds', bounds),
+    action: (name) => ipcRenderer.invoke('browser:action', name),
+    onState: (callback) => {
+      const handler = (event, state) => callback(state);
+      ipcRenderer.on('browser:state', handler);
+      return () => ipcRenderer.removeListener('browser:state', handler);
+    },
+  },
+
   /** Subscribe to pushed state; returns an unsubscribe function */
   onState: (callback) => {
     const handler = (event, state) => callback(state);

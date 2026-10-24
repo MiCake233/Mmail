@@ -17,7 +17,17 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-const { app, BrowserWindow, Tray, Menu, Notification, shell, ipcMain, nativeImage } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  WebContentsView,
+  Tray,
+  Menu,
+  Notification,
+  shell,
+  ipcMain,
+  nativeImage,
+} = require('electron');
 
 const { Store, MAX_ACCOUNTS } = require('./store');
 const { checkMailbox } = require('./mailcheck');
@@ -132,6 +142,7 @@ function createWindow(hidden) {
   });
 
   win.on('closed', () => {
+    destroyBrowserView();
     win = null;
   });
 
@@ -445,6 +456,134 @@ function validatePayload(payload) {
   return { value: value };
 }
 
+/* ------------------------------------------------------------------------- */
+/* ---------- Embedded browser                                               */
+/* ------------------------------------------------------------------------- */
+
+const BROWSER_PARTITION = 'persist:mmail-browser';
+
+let browserView = null;
+
+function destroyBrowserView() {
+  if (!browserView) return;
+  const view = browserView;
+  browserView = null;
+  try {
+    if (win && !win.isDestroyed()) win.contentView.removeChildView(view);
+  } catch (err) {
+    /* window already gone */
+  }
+  try {
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  } catch (err) {
+    /* already closed */
+  }
+}
+
+function browserHistory(contents) {
+  const history = contents.navigationHistory;
+  if (history && typeof history.canGoBack === 'function') {
+    return {
+      canGoBack: history.canGoBack(),
+      canGoForward: history.canGoForward(),
+      back: () => history.goBack(),
+      forward: () => history.goForward(),
+    };
+  }
+  return {
+    canGoBack: contents.canGoBack(),
+    canGoForward: contents.canGoForward(),
+    back: () => contents.goBack(),
+    forward: () => contents.goForward(),
+  };
+}
+
+function browserState() {
+  if (!browserView || browserView.webContents.isDestroyed()) return { open: false };
+  const contents = browserView.webContents;
+  const history = browserHistory(contents);
+  return {
+    open: true,
+    url: contents.getURL(),
+    title: contents.getTitle(),
+    loading: contents.isLoading(),
+    canGoBack: history.canGoBack,
+    canGoForward: history.canGoForward,
+  };
+}
+
+function pushBrowserState() {
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.webContents.send('browser:state', browserState());
+  } catch (err) {
+    /* window is closing */
+  }
+}
+
+function ensureBrowserView() {
+  if (browserView && !browserView.webContents.isDestroyed()) return browserView;
+
+  /* A separate webContents with no preload and a persistent session partition:
+     the page never sees Node, and sign-in cookies survive restarts. */
+  browserView = new WebContentsView({
+    webPreferences: {
+      partition: BROWSER_PARTITION,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      spellcheck: false,
+    },
+  });
+
+  const contents = browserView.webContents;
+
+  /* OAuth and "open in new tab" flows rely on window.open; let Electron create
+     real child windows that reuse the same session. */
+  contents.setWindowOpenHandler(() => ({
+    action: 'allow',
+    overrideBrowserWindowOptions: {
+      autoHideMenuBar: true,
+      webPreferences: {
+        partition: BROWSER_PARTITION,
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+    },
+  }));
+
+  contents.session.setPermissionRequestHandler((requesting, permission, callback) => callback(false));
+
+  ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'did-fail-load'].forEach(
+    (event) => contents.on(event, () => pushBrowserState())
+  );
+  contents.on('page-title-updated', () => pushBrowserState());
+
+  win.contentView.addChildView(browserView);
+  browserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  return browserView;
+}
+
+function applyBrowserBounds(bounds) {
+  if (!browserView) return;
+  const rect = bounds || {};
+  browserView.setBounds({
+    x: Math.max(0, Math.round(Number(rect.x) || 0)),
+    y: Math.max(0, Math.round(Number(rect.y) || 0)),
+    width: Math.max(0, Math.round(Number(rect.width) || 0)),
+    height: Math.max(0, Math.round(Number(rect.height) || 0)),
+  });
+}
+
+function openInAppBrowser(url, bounds) {
+  const view = ensureBrowserView();
+  applyBrowserBounds(bounds);
+  if (url) view.webContents.loadURL(url).catch(() => {});
+  pushBrowserState();
+  return browserState();
+}
+
 function registerIpc() {
   ipcMain.handle('app:get-state', () => snapshot());
 
@@ -519,6 +658,36 @@ function registerIpc() {
 
   ipcMain.handle('shell:open-external', (event, url) => {
     if (isExternalUrl(url)) shell.openExternal(url);
+  });
+
+  ipcMain.handle('browser:open', (event, url, bounds) => {
+    if (!isExternalUrl(url)) return { open: false };
+    return openInAppBrowser(url, bounds);
+  });
+
+  ipcMain.handle('browser:set-bounds', (event, bounds) => {
+    applyBrowserBounds(bounds);
+    return true;
+  });
+
+  ipcMain.handle('browser:close', () => {
+    destroyBrowserView();
+    return { open: false };
+  });
+
+  ipcMain.handle('browser:action', (event, action) => {
+    if (!browserView || browserView.webContents.isDestroyed()) return { open: false };
+    const contents = browserView.webContents;
+    const history = browserHistory(contents);
+    if (action === 'back' && history.canGoBack) history.back();
+    else if (action === 'forward' && history.canGoForward) history.forward();
+    else if (action === 'reload') contents.reload();
+    else if (action === 'stop') contents.stop();
+    else if (action === 'external') {
+      const current = contents.getURL();
+      if (isExternalUrl(current)) shell.openExternal(current);
+    }
+    return browserState();
   });
 
   ipcMain.on('ui:set-lang', (event, lang) => {

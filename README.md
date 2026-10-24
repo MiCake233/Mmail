@@ -1,6 +1,6 @@
 # Mmail
 
-**Status: beta** · version `0.1.0-beta.4` · MIT
+**Status: beta** · version `0.1.0-beta.5` · MIT
 
 A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstream mail providers into one searchable page, and can optionally poll a mailbox over IMAP and raise a desktop notification. It ships as an Electron desktop application, a static web build, and an Android shell.
 
@@ -44,6 +44,7 @@ Mail alerts depend on third-party IMAP servers and on network conditions outside
 - Light and dark themes (system-following by default) and a bilingual interface (Chinese / English).
 - Desktop: tray residency, launch at login, native notifications that open the provider's webmail on click.
 - Keyboard: `/` focuses search, `↑` / `↓` moves between entries, `Enter` opens, `Esc` closes panels.
+- Embedded browser: mail pages open inside the application in a sandboxed view, with back, forward, reload and a one-click switch to the system browser.
 - Web build: static files; a service worker caches the shell so the launcher opens offline.
 
 ## Platform support
@@ -83,6 +84,18 @@ ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install
 # Windows PowerShell
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'; npm install
 ```
+
+## Embedded browser
+
+Desktop builds open provider pages in an embedded browser instead of handing every click to the system browser.
+
+- The page runs in its own `WebContentsView`: no preload, no Node integration, `sandbox: true`.
+- Cookies and sessions live in a dedicated persistent partition (`persist:mmail-browser`) under the app's user data, so a signed-in mailbox stays signed in across restarts. Nothing is uploaded.
+- Camera, microphone, geolocation and similar permission requests from the page are denied.
+- OAuth popups still work: `window.open` creates a real child window sharing the same partition.
+- The toolbar offers back, forward, reload, *Open in system browser* and *Close*.
+
+Some providers refuse sign-in from an embedded browser. Google and Microsoft treat it as an insecure client and may answer with "this browser or app may not be secure"; Gmail, Outlook, Microsoft 365, Yahoo, iCloud and Proton show a warning in the toolbar and keep the system-browser fallback one click away. Settings → General → *Where links open* switches the default for every provider.
 
 ## Mail alerts
 
@@ -151,6 +164,9 @@ npm run dist        # electron-builder: zip / dmg / AppImage / deb into release/
 
 ## Known limitations
 
+- The embedded browser is desktop-only; the web and Android builds hand links to the system browser.
+- Google and Microsoft may block sign-in inside the embedded view; use the system-browser action for those accounts.
+
 - The Android target is a WebView shell. Background mail alerts are not implemented; the UI states that alerts require the desktop build.
 - Providers without an IMAP preset require the user to enter a host and port.
 - Outlook and Microsoft 365 cannot be used for alerts until OAuth is implemented.
@@ -170,7 +186,7 @@ MIT. See [LICENSE](./LICENSE).
 
 # 中文简介
 
-**状态：测试版（beta）** · 版本 `0.1.0-beta.4` · MIT
+**状态：测试版（beta）** · 版本 `0.1.0-beta.5` · MIT
 
 Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方登录页汇总到一页，可搜索、可筛选；桌面版可选地通过 IMAP 轮询收件箱并弹出系统通知。项目同时提供 Electron 桌面应用、静态网页版与安卓外壳。
 
@@ -209,6 +225,7 @@ macOS 包未签名、未公证。首次打开请在右键菜单中选择「打�
 - 明暗主题（默认跟随系统），中英双语界面。
 - 桌面版：托盘常驻、开机自启动、系统通知（点击通知打开对应邮箱网页）。
 - 键盘：`/` 聚焦搜索，`↑` / `↓` 在条目间移动，`Enter` 打开，`Esc` 关闭面板。
+- 内置浏览器：邮件页面在应用内的沙箱视图中打开，支持后退、前进、刷新，并可一键改用系统浏览器。
 - 网页版：纯静态文件，Service Worker 缓存外壳以支持离线打开。
 
 ## 平台支持
@@ -238,6 +255,18 @@ npm run web      # 网页版，http://127.0.0.1:5173
 ```powershell
 $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'; npm install
 ```
+
+## 内置浏览器
+
+桌面版把邮箱页面放在应用内的浏览器视图中打开，而不是每次点击都交给系统浏览器。
+
+- 页面运行在独立的 `WebContentsView` 中：无 preload、无 Node 集成、`sandbox: true`。
+- Cookie 与会话保存在独立持久分区（`persist:mmail-browser`，位于应用 userData 内），登录状态重启后保留；不会上传。
+- 页面申请的摄像头、麦克风、定位等权限一律拒绝。
+- OAuth 弹窗可用：`window.open` 会创建共享同一分区的真实子窗口。
+- 工具栏提供后退、前进、刷新、改用系统浏览器、关闭。
+
+部分服务商拒绝内嵌浏览器登录：Google 与微软会将其视为不安全客户端，可能返回「此浏览器或应用可能不安全」。Gmail、Outlook、Microsoft 365、Yahoo、iCloud、Proton 会在工具栏显示提示，系统浏览器出口一键可达。默认打开方式可在「设置 → 通用 → 链接打开方式」中切换。
 
 ## 收件提醒
 
@@ -283,6 +312,9 @@ npm run dist        # 使用 electron-builder 产出 zip / dmg / AppImage / deb 
 `npm run check` 在源码注释不是英文时会失败；语言数据（`locales.js`、`electron/strings.js` 中的 `zh` 表）除外。
 
 ## 已知限制
+
+- 内置浏览器仅桌面版可用；网页版与安卓版仍交给系统浏览器。
+- Google 与微软可能拒绝内嵌视图内的登录，这类账号请改用系统浏览器。
 
 - 安卓端为 WebView 外壳，后台收件提醒尚未实现，界面会明确提示需要桌面版。
 - 没有 IMAP 预设的服务商需要手动填写服务器地址与端口。
