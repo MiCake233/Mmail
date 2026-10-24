@@ -1,11 +1,21 @@
 # Mmail
 
-**Status: beta** · version `0.1.0-beta.1` · MIT
+**Status: beta** · version `0.1.0-beta.2` · MIT
 
 A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstream mail providers into one searchable page, and can optionally poll a mailbox over IMAP and raise a desktop notification. It ships as an Electron desktop application, a static web build, and an Android shell.
 
 > 中文简介见下方 **中文简介** 一节。
 > A Chinese introduction follows the English text below.
+
+## Download
+
+Prebuilt binaries are attached to the [releases](https://github.com/MiCake233/Mmail/releases):
+
+- **Windows** — `Mmail-<version>-win-x64.zip`: portable, no installer. Unpack and run `Mmail.exe`.
+- **Android** — `Mmail-<version>-android.apk`: debug-signed, sideload only.
+
+Both are beta builds. The Android package runs the same interface as the desktop and web builds;
+background mail alerts are not part of it yet (see the Android section below).
 
 ## Scope and legal position
 
@@ -22,6 +32,8 @@ Mail alerts depend on third-party IMAP servers and on network conditions outside
 ## Features
 
 - 27 providers: 13 China, 14 international, plus business-mailbox filtering.
+- Unread indicator: a red dot on the provider tile when a connected mailbox reports unread mail; opening the entry clears it.
+- One-step alert setup: the bell on a tile opens the account form with the provider preselected, and the IMAP host is inferred from the address you type.
 - Search by Chinese name, English name, domain, or alias; favourites, recents, and a local login history.
 - Light and dark themes (system-following by default) and a bilingual interface (Chinese / English).
 - Desktop: tray residency, launch at login, native notifications that open the provider's webmail on click.
@@ -112,6 +124,7 @@ npm run check       # static self-check: syntax, catalogue, locales, markup, com
 npm run test:imap   # IMAP client regression test against a local fake server
 npm run test:store  # storage and OS-encryption smoke test, runs inside Electron
 npm run icons       # regenerate icons from assets/icon-source.jpg
+npm run build:win   # assemble dist/Mmail-<version>-win-x64.zip (portable)
 ```
 
 `npm run check` also fails when a source comment is not in English. Locale data (`locales.js`, the `zh` tables in `electron/strings.js`) is exempt.
@@ -137,9 +150,18 @@ MIT. See [LICENSE](./LICENSE).
 
 # 中文简介
 
-**状态：测试版（beta）** · 版本 `0.1.0-beta.1` · MIT
+**状态：测试版（beta）** · 版本 `0.1.0-beta.2` · MIT
 
 Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方登录页汇总到一页，可搜索、可筛选；桌面版可选地通过 IMAP 轮询收件箱并弹出系统通知。项目同时提供 Electron 桌面应用、静态网页版与安卓外壳。
+
+## 下载
+
+预编译版本见 [Releases](https://github.com/MiCake233/Mmail/releases)：
+
+- **Windows** — `Mmail-<version>-win-x64.zip`：便携版，无需安装，解压后运行 `Mmail.exe`。
+- **Android** — `Mmail-<version>-android.apk`：调试签名，需手动安装。
+
+两者均为测试版。安卓包与桌面版、网页版使用同一套界面；后台收件提醒尚未包含在内（见下文“安卓端”）。
 
 ## 范围与法律定位
 
@@ -156,6 +178,8 @@ Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方�
 ## 功能
 
 - 27 家邮箱：国内 13 家、国际 14 家，并支持企业邮箱筛选。
+- 未读提示：已连接账号有未读邮件时，对应入口图标右上角显示红点；打开该入口后清除。
+- 一步开启提醒：卡片上的铃铛直接打开已预选服务商的添加表单，输入邮箱地址即自动匹配 IMAP 服务器。
 - 可按中文名、英文名、域名或别名搜索；提供收藏、最近访问与本地登录记录。
 - 明暗主题（默认跟随系统），中英双语界面。
 - 桌面版：托盘常驻、开机自启动、系统通知（点击通知打开对应邮箱网页）。
@@ -215,6 +239,7 @@ npm run check       # 静态自检：语法、邮箱数据、文案、结构、�
 npm run test:imap   # IMAP 客户端回归测试（本地假服务器）
 npm run test:store  # 存储与系统加密冒烟测试（在 Electron 内运行）
 npm run icons       # 从 assets/icon-source.jpg 重新生成图标
+npm run build:win   # 生成 dist/Mmail-<version>-win-x64.zip（便携版）
 ```
 
 `npm run check` 在源码注释不是英文时会失败；语言数据（`locales.js`、`electron/strings.js` 中的 `zh` 表）除外。

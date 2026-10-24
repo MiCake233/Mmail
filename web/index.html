@@ -8,7 +8,7 @@
       name="description"
       content="Mmail — a launcher for mainstream mail sign-in pages. Beta. No credentials are collected."
     />
-    <meta name="theme-color" content="#f4f6fb" />
+    <meta name="theme-color" content="#f7f6f3" />
     <link rel="icon" type="image/png" href="./assets/icon-192.png" />
     <link rel="apple-touch-icon" href="./assets/icon-192.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
@@ -39,14 +39,8 @@
     <div class="page">
       <header class="topbar">
         <a class="brand" href="./index.html" aria-label="Mmail">
-          <span class="brand-mark" aria-hidden="true">
-            <img src="./assets/icon-192.png" alt="" width="40" height="40" />
-          </span>
-          <span class="brand-text">
-            <strong>Mmail</strong>
-            <small data-i18n="app.tagline">Mail entries</small>
-          </span>
-          <span class="beta-badge" title="Beta">Beta</span>
+          <img class="brand-mark" src="./assets/icon-192.png" alt="" width="26" height="26" />
+          <span class="brand-text"><strong>Mmail</strong><span class="beta-badge">Beta</span></span>
         </a>
 
         <div class="topbar-actions">
@@ -106,21 +100,12 @@
               <circle cx="12.4" cy="17" r="2.2" />
             </svg>
           </button>
-          <a
-            class="ghost-btn gh-link"
-            href="https://github.com/MiCake233/Mmail"
-            target="_blank"
-            rel="noopener noreferrer"
-            >GitHub</a
-          >
         </div>
       </header>
 
       <main>
-        <section class="hero">
-          <h1>
-            <span data-i18n="hero.titleLead">Every mailbox, </span><span class="grad" data-i18n="hero.titleAccent">one click away</span>
-          </h1>
+        <section class="pagehead">
+          <h1 data-i18n="page.title">Mail entries</h1>
           <p id="hero-subtitle"></p>
         </section>
 
@@ -174,7 +159,7 @@
           </span>
         </div>
 
-        <nav class="chips" id="filters" data-i18n-aria="filter.all" aria-label="Filter by category"></nav>
+        <nav class="tabs" id="filters" data-i18n-aria="filter.all" aria-label="Filter by category"></nav>
 
         <section class="recents" id="recents" hidden>
           <span class="recents-label" data-i18n="recents.label">Recent</span>
@@ -191,8 +176,8 @@
         <p class="foot-links">
           <a href="https://github.com/MiCake233/Mmail" target="_blank" rel="noopener noreferrer">GitHub</a>
           <span aria-hidden="true">·</span>
-          <a href="https://github.com/MiCake233/Mmail/issues/new" target="_blank" rel="noopener noreferrer"
-            >Issues</a
+          <a href="https://github.com/MiCake233/Mmail/releases" target="_blank" rel="noopener noreferrer"
+            >Releases</a
           >
         </p>
       </footer>

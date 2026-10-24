@@ -52,6 +52,7 @@
     busy: false,
     form: { providerId: '', email: '', secret: '', host: '', port: '', secure: true },
     testResult: null,
+    ack: {},
   };
 
   let t = I18N.translator('zh');
@@ -283,17 +284,53 @@
     });
   }
 
+  function unreadCountOf(providerId) {
+    const accounts = (state.desktop.mail && state.desktop.mail.accounts) || [];
+    return accounts.reduce((max, account) => {
+      if (account.providerId !== providerId) return max;
+      const unread = (account.lastCheck && account.lastCheck.unread) || 0;
+      return unread > max ? unread : max;
+    }, 0);
+  }
+
+  function totalUnread() {
+    const accounts = (state.desktop.mail && state.desktop.mail.accounts) || [];
+    return accounts.reduce(
+      (sum, account) => sum + ((account.lastCheck && account.lastCheck.unread) || 0),
+      0
+    );
+  }
+
+  function hasUnread(providerId) {
+    return unreadCountOf(providerId) > (state.ack[providerId] || 0);
+  }
+
+  function acknowledge(providerId) {
+    const unread = unreadCountOf(providerId);
+    if (!unread) return;
+    state.ack[providerId] = unread;
+    writeJson('mmail.ack', state.ack);
+  }
+
+  function alertCapable(provider) {
+    return Boolean(provider.imap) && provider.imap.mode !== 'oauth';
+  }
+
   function cardMarkup(provider) {
     const length = Array.from(provider.mark).length;
-    const style = '--c:' + provider.color + (provider.ink ? ';--ink:' + provider.ink : '');
+    const style = '--c:' + provider.color;
+    const dot = hasUnread(provider.id) ? '<span class="dot" aria-hidden="true"></span>' : '';
     return (
       '<span class="mark" data-len="' + length + '" style="' + style + '">' +
-      '<span>' + esc(provider.mark) + '</span></span>'
+      '<span>' + esc(provider.mark) + '</span>' + dot + '</span>'
     );
   }
 
   function cardMarkupTitle(provider) {
-    const parts = [pNote(provider)];
+    const parts = [];
+    const unread = unreadCountOf(provider.id);
+    if (unread > 0) parts.push(t('entry.unread', { count: unread }));
+    parts.push(pNote(provider));
     const entry = state.history[provider.id];
     if (entry && entry.lastAt) parts.push(t('card.lastUsed', { time: timeAgo(entry.lastAt) }));
     return parts.filter(Boolean).join('\n');
@@ -305,6 +342,13 @@
 
   function cardTemplate(provider) {
     const favorite = state.favs.has(provider.id);
+    const bell = alertCapable(provider)
+      ? '<button class="icon-action bell" type="button" data-alert="' + esc(provider.id) + '"' +
+        ' aria-label="' + esc(t('entry.alertLabel', { name: pName(provider) })) + '"' +
+        ' title="' + esc(t('entry.alertLabel', { name: pName(provider) })) + '">' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 4.2-1.5 5.6-1.5 5.6h15S18 13.2 18 9Z"/><path d="M10.4 18.6a1.8 1.8 0 0 0 3.2 0"/></svg>' +
+      '</button>'
+      : '';
     return (
       '<li class="card" data-id="' + esc(provider.id) + '">' +
         '<a class="card-link" href="' + esc(provider.url) + '" target="_blank" rel="noopener noreferrer"' +
@@ -315,11 +359,13 @@
             '<span class="domain">' + esc(provider.domain) + '</span>' +
           '</span>' +
         '</a>' +
-        '<button class="star" type="button" data-fav="' + esc(provider.id) + '" aria-pressed="' + favorite + '"' +
-          ' aria-label="' + esc(cardFavoriteLabel(provider, favorite)) + '"' +
-          ' title="' + esc(cardFavoriteLabel(provider, favorite)) + '">' +
-          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.7l2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.72l-5.1 2.68.97-5.68L3.75 9.7l5.7-.83z"/></svg>' +
-        '</button>' +
+        '<span class="actions">' + bell +
+          '<button class="icon-action star" type="button" data-fav="' + esc(provider.id) + '" aria-pressed="' + favorite + '"' +
+            ' aria-label="' + esc(cardFavoriteLabel(provider, favorite)) + '"' +
+            ' title="' + esc(cardFavoriteLabel(provider, favorite)) + '">' +
+            '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.7l2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.72l-5.1 2.68.97-5.68L3.75 9.7l5.7-.83z"/></svg>' +
+          '</button>' +
+        '</span>' +
       '</li>'
     );
   }
@@ -353,9 +399,11 @@
     );
   }
 
-  function renderHero() {
-    const template = t('hero.subtitle', { count: '__COUNT__' });
-    els.heroSubtitle.innerHTML = esc(template).replace('__COUNT__', '<strong>' + PROVIDERS.length + '</strong>');
+  function renderPageHead() {
+    const accounts = (state.desktop.mail && state.desktop.mail.accounts) || [];
+    els.heroSubtitle.textContent = accounts.length
+      ? t('page.subtitleAlerts', { count: PROVIDERS.length, n: accounts.length })
+      : t('page.subtitle', { count: PROVIDERS.length });
   }
 
   function chipCount(id) {
@@ -370,7 +418,7 @@
     els.filters.innerHTML = CATEGORIES.map((category) => {
       const pressed = category.id === state.filter;
       return (
-        '<button class="chip" type="button" data-filter="' + esc(category.id) + '" aria-pressed="' + pressed + '">' +
+        '<button class="tab" type="button" data-filter="' + esc(category.id) + '" aria-pressed="' + pressed + '">' +
           '<span>' + esc(t(category.key)) + '</span>' +
           '<span class="count">' + chipCount(category.id) + '</span>' +
         '</button>'
@@ -442,24 +490,40 @@
 
     if (mail.accounts.length) parts.push(t('mail.accounts', { count: mail.accounts.length }));
 
-    let status;
+    /* The run-level result can be empty right after start; fall back to the
+       per-account results so the bar never contradicts the unread counter. */
+    const accountsLastAt = mail.accounts.reduce((latest, account) => {
+      const at = account.lastCheck && account.lastCheck.at ? account.lastCheck.at : 0;
+      return at > latest ? at : latest;
+    }, 0);
+    const accountsError = mail.accounts.reduce(
+      (found, account) => found || (account.lastCheck && account.lastCheck.error) || null,
+      null
+    );
+    const lastAt = (mail.lastCheck && mail.lastCheck.at) || accountsLastAt;
+    const lastError = (mail.lastCheck && mail.lastCheck.error) || accountsError;
+    const lastNew = (mail.lastCheck && mail.lastCheck.newCount) || 0;
+
+    /* The bar already reports the unread total; only add a status word when it
+       carries new information (checking, failure, new arrivals, never checked). */
+    let status = '';
     let tone = 'ok';
     if (mail.checking) {
       status = t('mail.checking');
       tone = 'busy';
-    } else if (mail.lastCheck && mail.lastCheck.error) {
-      status = t('mail.failed') + ' · ' + errorText(mail.lastCheck.error);
+    } else if (lastError) {
+      status = t('mail.failed') + ' · ' + errorText(lastError);
       tone = 'error';
-    } else if (mail.lastCheck && mail.lastCheck.at) {
-      status = mail.lastCheck.newCount
-        ? t('mail.newCount', { count: mail.lastCheck.newCount })
-        : t('mail.upToDate');
-    } else {
+    } else if (lastNew) {
+      status = t('mail.newCount', { count: lastNew });
+    } else if (!lastAt) {
       status = t('mail.never');
     }
-    if (mail.lastCheck && mail.lastCheck.at) parts.push(t('mail.lastCheck', { time: clock(mail.lastCheck.at) }));
+    const unread = totalUnread();
+    if (unread > 0) parts.push(t('mail.unread', { count: unread }));
+    if (lastAt) parts.push(t('mail.lastCheck', { time: clock(lastAt) }));
 
-    els.mailbarText.textContent = parts.join(' · ') + ' · ' + status;
+    els.mailbarText.textContent = parts.concat(status ? [status] : []).join(' · ');
     els.mailbar.dataset.tone = tone;
     els.mailSetup.hidden = mail.accounts.length > 0;
     els.mailCheck.hidden = mail.accounts.length === 0;
@@ -630,6 +694,7 @@
           '<span>' + esc(t('settings.mail.email')) + '</span>' +
           '<input id="acc-email" class="input" type="email" autocomplete="off" spellcheck="false" value="' + esc(form.email) + '" placeholder="you@example.com" />' +
         '</label>' +
+        '<p class="field-desc" id="acc-detect">' + esc(detectHintText()) + '</p>' +
         '<label class="input-row">' +
           '<span>' + esc(t('settings.mail.secret')) + '</span>' +
           '<input id="acc-secret" class="input" type="password" autocomplete="new-password" value="' + esc(form.secret) + '" placeholder="' + esc(t('settings.mail.secretPlaceholder')) + '" />' +
@@ -756,7 +821,7 @@
   }
 
   function renderAboutTab() {
-    const version = state.desktop.appVersion || '0.1.0-beta.1';
+    const version = state.desktop.appVersion || '0.1.0-beta.2';
     return (
       '<div class="field">' +
         '<div class="field-label">Mmail</div>' +
@@ -789,9 +854,25 @@
     els.body.innerHTML = (renderers[state.settingsTab] || renderGeneralTab)();
   }
 
-  function openSettings(tab) {
+  function openSettings(tab, options) {
     lastFocused = document.activeElement;
     state.settingsTab = tab || 'general';
+    state.busy = false;
+    state.testResult = null;
+    const config = options || {};
+    state.adding = Boolean(config.add);
+    state.form = { providerId: '', email: '', secret: '', host: '', port: '', secure: true };
+    if (config.add && config.providerId) {
+      const provider = providerById.get(config.providerId);
+      if (provider) {
+        state.form.providerId = provider.id;
+        if (provider.imap) {
+          state.form.host = provider.imap.host;
+          state.form.port = String(provider.imap.port);
+          state.form.secure = provider.imap.secure !== false;
+        }
+      }
+    }
     els.settings.hidden = false;
     document.documentElement.classList.add('is-locked');
     renderSettings();
@@ -834,6 +915,8 @@
     state.desktop = Object.assign({}, EMPTY_DESKTOP, next);
     state.desktop.mail = Object.assign({}, EMPTY_DESKTOP.mail, next.mail || {});
     renderMailBar();
+    renderPageHead();
+    renderContent();
     if (isSettingsOpen() && (state.settingsTab === 'mail' || state.settingsTab === 'general')) {
       if (!(state.settingsTab === 'mail' && state.adding)) renderSettings();
     }
@@ -856,6 +939,56 @@
     } catch (err) {
       showToast(t('err.unknown'));
     }
+  }
+
+  const DOMAIN_HINTS = {
+    gmail: ['gmail.com', 'googlemail.com'],
+    outlook: ['outlook.com', 'hotmail.com', 'live.com', 'msn.com'],
+    icloud: ['icloud.com', 'me.com', 'mac.com'],
+    sina: ['sina.com', 'sina.cn'],
+    yahoo: ['yahoo.com', 'ymail.com', 'rocketmail.com'],
+    yandex: ['yandex.com', 'yandex.ru', 'ya.ru'],
+  };
+
+  function baseDomainOf(provider) {
+    const parts = String(provider.domain || '').split('.');
+    return parts.length > 2 ? parts.slice(-2).join('.') : provider.domain;
+  }
+
+  const DOMAIN_INDEX = (() => {
+    const index = new Map();
+    PROVIDERS.forEach((provider) => {
+      const hints = DOMAIN_HINTS[provider.id] || [baseDomainOf(provider)];
+      hints.forEach((domain) => {
+        if (domain && !index.has(domain)) index.set(domain, provider);
+      });
+    });
+    return index;
+  })();
+
+  function detectProvider(email) {
+    const value = String(email || '').trim().toLowerCase();
+    const at = value.lastIndexOf('@');
+    if (at === -1) return null;
+    return DOMAIN_INDEX.get(value.slice(at + 1)) || null;
+  }
+
+  function detectHintText() {
+    const detected = state.form.email ? detectProvider(state.form.email) : null;
+    return detected
+      ? t('settings.mail.detected', { name: pName(detected) })
+      : t('settings.mail.detectHint');
+  }
+
+  function syncFormInputs() {
+    const select = $('#acc-provider');
+    const host = $('#acc-host');
+    const port = $('#acc-port');
+    const secureBox = $('#acc-secure');
+    if (select) select.value = state.form.providerId;
+    if (host) host.value = state.form.host;
+    if (port) port.value = state.form.port;
+    if (secureBox) secureBox.checked = state.form.secure;
   }
 
   function readForm() {
@@ -1008,13 +1141,25 @@
         toggleFavorite(star.dataset.fav);
         return;
       }
+      const bell = event.target.closest('[data-alert]');
+      if (bell) {
+        event.preventDefault();
+        openSettings('mail', { add: true, providerId: bell.dataset.alert });
+        return;
+      }
       const link = event.target.closest('[data-open]');
-      if (link) recordOpen(link.dataset.open);
+      if (link) {
+        acknowledge(link.dataset.open);
+        recordOpen(link.dataset.open);
+      }
     });
 
     els.recentsList.addEventListener('click', (event) => {
       const link = event.target.closest('[data-open]');
-      if (link) recordOpen(link.dataset.open);
+      if (link) {
+        acknowledge(link.dataset.open);
+        recordOpen(link.dataset.open);
+      }
     });
 
     els.settingsToggle.addEventListener('click', () => openSettings('general'));
@@ -1056,6 +1201,7 @@
         case 'add-account':
           state.adding = true;
           state.testResult = null;
+          state.busy = false;
           state.form = { providerId: '', email: '', secret: '', host: '', port: '', secure: true };
           renderSettings();
           break;
@@ -1120,7 +1266,23 @@
     });
 
     els.body.addEventListener('input', (event) => {
-      if (event.target.id && event.target.id.indexOf('acc-') === 0) readForm();
+      const id = event.target.id;
+      if (!id || id.indexOf('acc-') !== 0) return;
+      readForm();
+
+      if (id !== 'acc-email') return;
+      const detected = detectProvider(state.form.email);
+      if (detected && detected.id !== state.form.providerId) {
+        state.form.providerId = detected.id;
+        if (detected.imap) {
+          state.form.host = detected.imap.host;
+          state.form.port = String(detected.imap.port);
+          state.form.secure = detected.imap.secure !== false;
+        }
+        syncFormInputs();
+      }
+      const hint = $('#acc-detect');
+      if (hint) hint.textContent = detectHintText();
     });
 
     els.langToggle.addEventListener('click', () => {
@@ -1135,7 +1297,7 @@
     });
 
     els.mailCheck.addEventListener('click', checkNow);
-    els.mailSetup.addEventListener('click', () => openSettings('mail'));
+    els.mailSetup.addEventListener('click', () => openSettings('mail', { add: true }));
 
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && isSettingsOpen()) {
@@ -1199,7 +1361,7 @@
 
   function renderAll() {
     applyStaticI18n();
-    renderHero();
+    renderPageHead();
     renderChips();
     renderRecents();
     renderContent();
@@ -1243,6 +1405,8 @@
 
     state.favs = new Set(readJson(STORE.favs, []).filter(knownId));
     state.recent = readJson(STORE.recent, []).filter(knownId).slice(0, LIMITS.recent);
+    const ack = readJson('mmail.ack', {});
+    state.ack = ack && typeof ack === 'object' ? ack : {};
 
     const history = readJson(STORE.history, {});
     state.history = {};

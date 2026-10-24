@@ -1,7 +1,7 @@
 {
   "name": "mmail",
   "productName": "Mmail",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "private": true,
   "description": "Mmail — a launcher for mainstream mail sign-in pages with optional new-mail alerts. Beta.",
   "license": "MIT",
@@ -18,7 +18,8 @@
     "check": "node scripts/check.mjs",
     "test:imap": "node scripts/test-imap.mjs",
     "test:store": "electron scripts/test-store.js",
-    "icons": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icons.ps1"
+    "icons": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icons.ps1",
+    "build:win": "node scripts/build-win.mjs"
   },
   "engines": {
     "node": ">=18"
