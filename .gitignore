@@ -1,0 +1,30 @@
+# Dependencies and build output
+node_modules/
+dist/
+out/
+*.log
+
+# Scratch screenshots (published ones live in docs/)
+shots/
+
+# Editors
+.vscode/
+.idea/
+*.iml
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.apk
+*.aab
+
+# Electron packaging output
+release/
