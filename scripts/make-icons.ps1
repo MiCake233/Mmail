@@ -72,6 +72,74 @@ function Save-Png {
   Write-Host ('  wrote ' + $Path)
 }
 
+function New-IconPngBytes {
+  param([int]$Size)
+  $bitmap = New-IconBitmap -Size $Size
+  $memory = New-Object System.IO.MemoryStream
+  $bitmap.Save($memory, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bitmap.Dispose()
+  $bytes = $memory.ToArray()
+  $memory.Dispose()
+  # Wrap so PowerShell does not unroll the byte array into single bytes.
+  return ,$bytes
+}
+
+# Assemble a multi-frame .ico with PNG-compressed frames.
+# Do not derive the .ico from a 512px HICON: the ICO header stores dimensions
+# in one byte, so 512 wraps to 0 and Explorer refuses to render the file.
+function Write-IcoFile {
+  param([string]$Path, [int[]]$Sizes)
+
+  $blobs = New-Object System.Collections.Generic.List[byte[]]
+  foreach ($size in $Sizes) {
+    $blobs.Add((New-IconPngBytes -Size $size))
+  }
+
+  $count = $blobs.Count
+  $headerLength = 6 + (16 * $count)
+  $total = $headerLength
+  foreach ($blob in $blobs) { $total += $blob.Length }
+
+  $buffer = New-Object 'byte[]' $total
+  $buffer[2] = 1                                    # resource type: icon
+  $buffer[4] = [byte]($count -band 0xFF)            # image count, low byte
+  $buffer[5] = [byte](($count -shr 8) -band 0xFF)   # image count, high byte
+
+  $offset = $headerLength
+  $entry = 6
+  for ($index = 0; $index -lt $count; $index++) {
+    $blob = $blobs[$index]
+    $size = $Sizes[$index]
+    $dimension = 0
+    if ($size -lt 256) { $dimension = $size }
+
+    $buffer[$entry] = [byte]$dimension
+    $buffer[$entry + 1] = [byte]$dimension
+    $buffer[$entry + 2] = 0
+    $buffer[$entry + 3] = 0
+    $buffer[$entry + 4] = 1                         # colour planes
+    $buffer[$entry + 5] = 0
+    $buffer[$entry + 6] = 32                        # bits per pixel
+    $buffer[$entry + 7] = 0
+
+    $length = $blob.Length
+    $buffer[$entry + 8] = [byte]($length -band 0xFF)
+    $buffer[$entry + 9] = [byte](($length -shr 8) -band 0xFF)
+    $buffer[$entry + 10] = [byte](($length -shr 16) -band 0xFF)
+    $buffer[$entry + 11] = [byte](($length -shr 24) -band 0xFF)
+    $buffer[$entry + 12] = [byte]($offset -band 0xFF)
+    $buffer[$entry + 13] = [byte](($offset -shr 8) -band 0xFF)
+    $buffer[$entry + 14] = [byte](($offset -shr 16) -band 0xFF)
+    $buffer[$entry + 15] = [byte](($offset -shr 24) -band 0xFF)
+
+    [System.Array]::Copy($blob, 0, $buffer, $offset, $length)
+    $offset += $length
+    $entry += 16
+  }
+
+  [System.IO.File]::WriteAllBytes($Path, $buffer)
+}
+
 Write-Host 'Mmail icons'
 
 $icon512 = New-IconBitmap -Size 512
@@ -82,14 +150,8 @@ $icon192 = New-IconBitmap -Size 192
 Save-Png -Bitmap $icon192 -Path (Join-Path $webAssets 'icon-192.png')
 $icon192.Dispose()
 
-# Windows .ico for shortcut / installer; Explorer downscales as needed
-$icoHandle = $icon512.GetHicon()
-$ico = [System.Drawing.Icon]::FromHandle($icoHandle)
-$stream = [System.IO.File]::Create((Join-Path $assets 'icon.ico'))
-$ico.Save($stream)
-$stream.Close()
-$stream.Dispose()
-$ico.Dispose()
+# Windows .ico for the shortcut and installer: 16/32/48/256 PNG frames
+Write-IcoFile -Path (Join-Path $assets 'icon.ico') -Sizes @(16, 32, 48, 256)
 Write-Host ('  wrote ' + (Join-Path $assets 'icon.ico'))
 $icon512.Dispose()
 
