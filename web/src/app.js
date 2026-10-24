@@ -401,6 +401,14 @@
     );
   }
 
+  function updateFooterHint() {
+    if (!els.updateHint) return;
+    const latest = state.desktop.latestVersion || '';
+    els.updateHint.hidden = !latest;
+    if (!latest) return;
+    els.updateHint.textContent = t('footer.updateAvailable', { version: latest });
+  }
+
   function renderPageHead() {
     const accounts = (state.desktop.mail && state.desktop.mail.accounts) || [];
     els.heroSubtitle.textContent = accounts.length
@@ -618,6 +626,40 @@
         ) +
       '</div>' +
       '<div class="field">' +
+        '<div class="field-label">' + esc(t('settings.general.proxy')) + '</div>' +
+        '<div class="field-desc">' + esc(t('settings.general.proxyDesc')) + '</div>' +
+        segmentedMarkup(
+          'data-proxy-mode',
+          [
+            { id: 'system', label: t('settings.general.proxySystem') },
+            { id: 'direct', label: t('settings.general.proxyDirect') },
+            { id: 'custom', label: t('settings.general.proxyCustom') },
+          ],
+          (state.desktop.proxy && state.desktop.proxy.mode) || 'system'
+        ) +
+        ((state.desktop.proxy && state.desktop.proxy.mode) === 'custom'
+          ? '<label class="input-row"><span>' + esc(t('settings.general.proxyUrl')) + '</span>' +
+            '<input id="proxy-url" class="input" type="text" autocomplete="off" spellcheck="false" value="' +
+            esc(state.desktop.proxy.url || '') + '" placeholder="socks5://127.0.0.1:7890" /></label>'
+          : '') +
+      '</div>' +
+      '<div class="field">' +
+        '<div class="field-row">' +
+          '<div>' +
+            '<div class="field-label">' + esc(t('settings.general.updateCheck')) + '</div>' +
+            '<div class="field-desc">' + esc(t('settings.general.updateCheckDesc')) + '</div>' +
+          '</div>' +
+          switchMarkup('updateCheck', Boolean(state.desktop.updateCheck), !isDesktop) +
+        '</div>' +
+      '</div>' +
+      '<div class="field">' +
+        '<div class="field-label">' + esc(t('settings.general.browserDataTitle')) + '</div>' +
+        '<div class="field-desc">' + esc(t('settings.general.browserDataDesc')) + '</div>' +
+        '<button class="ghost-btn" type="button" data-act="clear-browser"' + (isDesktop ? '' : ' disabled') + '>' +
+          esc(t('settings.general.browserDataClear')) +
+        '</button>' +
+      '</div>' +
+      '<div class="field">' +
         '<div class="field-row">' +
           '<div>' +
             '<div class="field-label">' + esc(t('settings.general.autostart')) +
@@ -675,6 +717,11 @@
           '<span class="account-sub">' + esc(result) + '</span>' +
           insecure +
         '</span>' +
+        '<button class="icon-action account-mute" type="button" data-act="toggle-notify" data-id="' + esc(account.id) + '"' +
+          ' aria-pressed="' + (account.notify !== false) + '"' +
+          ' title="' + esc(t(account.notify !== false ? 'settings.mail.muteOn' : 'settings.mail.muteOff')) + '">' +
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 1 0-12 0c0 4.2-1.5 5.6-1.5 5.6h15S18 13.2 18 9Z"/><path d="M10.4 18.6a1.8 1.8 0 0 0 3.2 0"/></svg>' +
+        '</button>' +
         '<button class="ghost-btn ghost-btn--sm" type="button" data-act="remove-account" data-id="' + esc(account.id) + '">' +
           esc(t('settings.mail.remove')) +
         '</button>' +
@@ -789,6 +836,23 @@
         '<div class="field-desc">' + esc(lastCheck) + '</div>' +
       '</div>' +
       '<div class="field">' +
+        '<div class="field-row">' +
+          '<div>' +
+            '<div class="field-label">' + esc(t('settings.mail.quiet')) + '</div>' +
+            '<div class="field-desc">' + esc(t('settings.mail.quietDesc')) + '</div>' +
+          '</div>' +
+          switchMarkup('quietEnabled', Boolean(mail.quietHours && mail.quietHours.enabled), false) +
+        '</div>' +
+        (mail.quietHours && mail.quietHours.enabled
+          ? '<div class="input-grid">' +
+              '<label class="input-row"><span>' + esc(t('settings.mail.quietStart')) + '</span>' +
+                '<input class="input" type="time" data-setting="quietStart" value="' + esc(mail.quietHours.start) + '" /></label>' +
+              '<label class="input-row"><span>' + esc(t('settings.mail.quietEnd')) + '</span>' +
+                '<input class="input" type="time" data-setting="quietEnd" value="' + esc(mail.quietHours.end) + '" /></label>' +
+            '</div>'
+          : '') +
+      '</div>' +
+      '<div class="field">' +
         '<div class="field-label">' + esc(t('settings.mail.accounts')) + '</div>' +
         '<div class="field-desc">' + esc(t('settings.mail.accountsDesc')) + '</div>' +
         (accounts.length
@@ -840,7 +904,7 @@
   }
 
   function renderAboutTab() {
-    const version = state.desktop.appVersion || '0.1.0-beta.5';
+    const version = state.desktop.appVersion || '0.1.0-beta.6';
     return (
       '<div class="field">' +
         '<div class="field-label">Mmail</div>' +
@@ -852,6 +916,10 @@
         '<p class="field-desc">' + esc(t('settings.about.legal')) + '</p>' +
         '<p class="field-desc">' + esc(t('settings.about.license')) + '</p>' +
         '<p class="field-desc"><a class="link" href="https://github.com/MiCake233/Mmail" target="_blank" rel="noopener noreferrer">github.com/MiCake233/Mmail</a></p>' +
+        (isDesktop
+          ? '<div class="form-actions"><button class="ghost-btn" type="button" data-act="copy-diag">' +
+            esc(t('settings.about.copyDiag')) + '</button></div>'
+          : '') +
       '</div>'
     );
   }
@@ -936,6 +1004,7 @@
     state.desktop.mail = Object.assign({}, EMPTY_DESKTOP.mail, next.mail || {});
     renderMailBar();
     renderPageHead();
+    updateFooterHint();
     renderContent();
     if (isSettingsOpen() && (state.settingsTab === 'mail' || state.settingsTab === 'general')) {
       if (!(state.settingsTab === 'mail' && state.adding)) renderSettings();
@@ -1213,6 +1282,15 @@
         return;
       }
 
+      const proxyButton = target.closest('[data-proxy-mode]');
+      if (proxyButton) {
+        setDesktopSetting('proxy', {
+          mode: proxyButton.dataset.proxyMode,
+          url: (state.desktop.proxy && state.desktop.proxy.url) || '',
+        });
+        return;
+      }
+
       const modeButton = target.closest('[data-open-mode]');
       if (modeButton) {
         state.openMode = modeButton.dataset.openMode === 'system' ? 'system' : 'inapp';
@@ -1246,6 +1324,31 @@
         case 'remove-account':
           removeAccount(action.dataset.id);
           break;
+        case 'toggle-notify': {
+          const id = action.dataset.id;
+          const account = ((state.desktop.mail && state.desktop.mail.accounts) || []).find(
+            (item) => item.id === id
+          );
+          const next = !(account && account.notify !== false);
+          if (bridge.setAccountNotify) {
+            bridge.setAccountNotify(id, next).then(applyDesktopState).catch(() => {});
+          }
+          break;
+        }
+        case 'clear-browser':
+          if (bridge.clearBrowserData) {
+            bridge.clearBrowserData().then((result) => {
+              showToast(t(result && result.ok ? 'settings.general.browserDataDone' : 'err.unknown'));
+            });
+          }
+          break;
+        case 'copy-diag':
+          if (bridge.copyDiagnostics) {
+            bridge.copyDiagnostics().then((result) => {
+              showToast(t(result && result.ok ? 'settings.about.copied' : 'err.unknown'));
+            });
+          }
+          break;
         case 'clear-history':
           clearHistory();
           break;
@@ -1276,6 +1379,28 @@
           readForm();
           return;
         }
+        if (key === 'updateCheck') {
+          setDesktopSetting('updateCheck', setting.checked);
+          return;
+        }
+        if (key === 'quietEnabled' || key === 'quietStart' || key === 'quietEnd') {
+          const quiet = (state.desktop.mail && state.desktop.mail.quietHours) || {};
+          const next = {
+            enabled: Boolean(quiet.enabled),
+            start: quiet.start || '22:00',
+            end: quiet.end || '08:00',
+          };
+          if (key === 'quietEnabled') next.enabled = setting.checked;
+          if (key === 'quietStart') next.start = setting.value;
+          if (key === 'quietEnd') next.end = setting.value;
+          setDesktopSetting('quietHours', next);
+          return;
+        }
+      }
+
+      if (target.id === 'proxy-url') {
+        setDesktopSetting('proxy', { mode: 'custom', url: target.value.trim() });
+        return;
       }
 
       if (target.id === 'acc-provider') {
@@ -1481,6 +1606,7 @@
     renderRecents();
     renderContent();
     renderMailBar();
+    updateFooterHint();
     if (isSettingsOpen()) renderSettings();
   }
 
@@ -1515,6 +1641,7 @@
     els.browserClose = $('#browser-close');
     els.browserExternal = $('#browser-external');
     els.browserSurface = $('#browser-surface');
+    els.updateHint = $('#update-hint');
 
     if (!els.q || !els.content) return;
 

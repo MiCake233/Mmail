@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld('mmail', {
 
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
 
+  /** Update check, diagnostics and per-account notification state. */
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  copyDiagnostics: () => ipcRenderer.invoke('diag:copy'),
+  setAccountNotify: (id, notify) => ipcRenderer.invoke('mail:set-account-notify', id, notify),
+  clearBrowserData: () => ipcRenderer.invoke('browser:clear'),
+
   /** Embedded browser: separate sandboxed webContents hosted by the window. */
   browser: {
     open: (url, bounds) => ipcRenderer.invoke('browser:open', url, bounds),

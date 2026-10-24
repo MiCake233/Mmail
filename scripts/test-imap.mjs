@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import imapModule from '../electron/imap.js';
 import mailcheckModule from '../electron/mailcheck.js';
 
-const { parseHeaders, decodeWords } = imapModule;
+const { parseHeaders, decodeWords, parseProxy } = imapModule;
 const { checkMailbox } = mailcheckModule;
 
 /* ------------------------------------------------------------------ */
@@ -42,6 +42,36 @@ const HEADERS = {
 };
 
 const SERVER_UIDS = [10, 11, 12];
+
+/* Minimal SOCKS5 proxy (no auth) used to verify the proxied IMAP path. */
+function startSocksProxy() {
+  const server = net.createServer((client) => {
+    client.on('error', () => {});
+    client.once('data', (greeting) => {
+      if (greeting[0] !== 0x05) {
+        client.destroy();
+        return;
+      }
+      client.write(Buffer.from([0x05, 0x00]));
+      client.once('data', (request) => {
+        let cursor = 4;
+        const hostLength = request[cursor];
+        const host = request.subarray(cursor + 1, cursor + 1 + hostLength).toString('utf8');
+        cursor += 1 + hostLength;
+        const port = request.readUInt16BE(cursor);
+        const upstream = net.connect(port, host, () => {
+          client.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+          client.pipe(upstream);
+          upstream.pipe(client);
+        });
+        upstream.on('error', () => client.destroy());
+      });
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port }));
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* Fake server                                                        */
@@ -257,6 +287,18 @@ await test('protocol sequence: LOGIN -> ID -> SELECT -> SEARCH -> FETCH -> LOGOU
   });
 });
 
+const socks = await startSocksProxy();
+
+await test('proxied check through a local SOCKS5 proxy', async () => {
+  const result = await checkMailbox(
+    Object.assign({ lastUid: 9, proxy: parseProxy('socks5://127.0.0.1:' + socks.port) }, baseConfig)
+  );
+  assert.equal(result.ok, true, 'error: ' + JSON.stringify(result.error));
+  assert.equal(result.newCount, 3);
+  assert.equal(result.newUid, 12);
+});
+
+socks.server.close();
 await test('wrong credentials surface err.auth', async () => {
   const result = await checkMailbox(Object.assign({ lastUid: 0 }, baseConfig, { secret: 'wrong-code' }));
   assert.equal(result.ok, false);

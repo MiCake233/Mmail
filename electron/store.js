@@ -22,9 +22,18 @@ const MAX_ACCOUNTS = 8;
 function defaults() {
   return {
     version: 1,
-    app: { autoStart: false, startMinimized: false },
-    mail: { enabled: true, intervalMinutes: 10 },
-    ui: { lang: 'zh' },
+    app: {
+      autoStart: false,
+      startMinimized: false,
+      /* system: follow the OS proxy; direct: never; custom: use proxy.url */
+      proxy: { mode: 'system', url: '' },
+    },
+    mail: {
+      enabled: true,
+      intervalMinutes: 10,
+      quietHours: { enabled: false, start: '22:00', end: '08:00' },
+    },
+    ui: { lang: 'zh', updateCheck: false, latestVersion: '' },
     accounts: [],
   };
 }
@@ -141,6 +150,7 @@ class Store {
       host: account.host,
       port: account.port,
       secure: account.secure !== false,
+      notify: account.notify !== false,
       /* false when the OS keystore is unavailable and the secret fell back to Base64 */
       encrypted: Boolean(account.secret && account.secret.enc === 'os'),
       lastCheck: account.lastCheck || null,
@@ -171,6 +181,7 @@ class Store {
       secret: await encryptSecret(input.secret),
       lastUid: 0,
       lastCheck: null,
+      notify: true,
       createdAt: Date.now(),
     };
     this.data.accounts.push(account);
@@ -206,6 +217,21 @@ class Store {
     };
   }
 
+  get proxy() {
+    const proxy = this.data.app.proxy || {};
+    const mode = ['system', 'direct', 'custom'].includes(proxy.mode) ? proxy.mode : 'system';
+    return { mode: mode, url: String(proxy.url || '') };
+  }
+
+  get quietHours() {
+    const quiet = this.data.mail.quietHours || {};
+    return {
+      enabled: Boolean(quiet.enabled),
+      start: /^d{2}:d{2}$/.test(String(quiet.start)) ? String(quiet.start) : '22:00',
+      end: /^d{2}:d{2}$/.test(String(quiet.end)) ? String(quiet.end) : '08:00',
+    };
+  }
+
   /** Snapshot consumed by the renderer. */
   snapshot(runtime) {
     const info = runtime || {};
@@ -215,9 +241,13 @@ class Store {
       autoStart: Boolean(this.data.app.autoStart),
       startMinimized: Boolean(this.data.app.startMinimized),
       lang: this.data.ui.lang === 'en' ? 'en' : 'zh',
+      proxy: this.proxy,
+      updateCheck: Boolean(this.data.ui.updateCheck),
+      latestVersion: String(this.data.ui.latestVersion || ''),
       mail: {
         enabled: Boolean(this.data.mail.enabled),
         intervalMinutes: Number(this.data.mail.intervalMinutes) || 10,
+        quietHours: this.quietHours,
         checking: Boolean(info.checking),
         lastCheck: info.lastCheck || null,
         accounts: this.listAccounts(),

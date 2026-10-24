@@ -1210,6 +1210,27 @@ html.is-browsing {
   white-space: nowrap;
 }
 
+.account-mute {
+  opacity: 1;
+}
+
+.account-mute[aria-pressed='false'] {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+.update-hint {
+  margin-right: 10px;
+  color: var(--accent);
+  font-size: 11.5px;
+  text-decoration: none;
+}
+
+.update-hint:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .account-warn {
   display: block;
   color: var(--warn);

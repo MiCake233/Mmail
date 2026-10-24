@@ -17,6 +17,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const { execFileSync } = require('node:child_process');
 const {
   app,
   BrowserWindow,
@@ -27,11 +28,14 @@ const {
   shell,
   ipcMain,
   nativeImage,
+  session,
+  clipboard,
+  net,
 } = require('electron');
 
 const { Store, MAX_ACCOUNTS } = require('./store');
 const { checkMailbox } = require('./mailcheck');
-const { probe } = require('./imap');
+const { probe, parseProxy } = require('./imap');
 const { NOTIFY, TRAY, fill } = require('./strings');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
@@ -89,6 +93,132 @@ function clampInterval(value) {
   const minutes = Number(value);
   if (!Number.isFinite(minutes)) return 10;
   return Math.min(180, Math.max(1, Math.round(minutes)));
+}
+
+/* ------------------------------------------------------------------------- */
+/* ---------- Proxy                                                          */
+/* ------------------------------------------------------------------------- */
+
+/** Best-effort lookup of the OS proxy, used when the mode is "system". */
+function systemProxyUrl() {
+  const env = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.ALL_PROXY || process.env.all_proxy;
+  if (env) return env;
+
+  try {
+    if (process.platform === 'win32') {
+      const output = execFileSync(
+        'reg',
+        ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'],
+        { encoding: 'utf8', timeout: 3000 }
+      );
+      if (!/ProxyEnable\s+REG_DWORD\s+0x1/.test(output)) return null;
+      const match = /ProxyServer\s+REG_SZ\s+(\S+)/.exec(output);
+      if (!match) return null;
+      const value = match[1];
+      const socks = /socks=([^;]+)/.exec(value);
+      if (socks) return 'socks5://' + socks[1];
+      const http = /(?:https?)=([^;]+)/.exec(value);
+      if (http) return 'http://' + http[1];
+      return 'http://' + value;
+    }
+
+    if (process.platform === 'darwin') {
+      const output = execFileSync('scutil', ['--proxy'], { encoding: 'utf8', timeout: 3000 });
+      if (/SOCKSEnable\s*:\s*1/.test(output)) {
+        const host = /SOCKSProxy\s*:\s*([\w.\-]+)/.exec(output);
+        const port = /SOCKSPort\s*:\s*(\d+)/.exec(output);
+        if (host && port) return 'socks5://' + host[1] + ':' + port[1];
+      }
+      if (/HTTPSEnable\s*:\s*1/.test(output)) {
+        const host = /HTTPSProxy\s*:\s*([\w.\-]+)/.exec(output);
+        const port = /HTTPSPort\s*:\s*(\d+)/.exec(output);
+        if (host && port) return 'http://' + host[1] + ':' + port[1];
+      }
+    }
+  } catch (err) {
+    /* detection is best-effort */
+  }
+  return null;
+}
+
+/** Resolve the configured proxy into a URL plus the parsed form used by IMAP. */
+function resolvedProxy() {
+  const settings = store.proxy;
+  if (settings.mode === 'direct') return { url: null, parsed: null };
+  if (settings.mode === 'custom') {
+    const parsed = parseProxy(settings.url);
+    return { url: parsed ? settings.url : null, parsed: parsed };
+  }
+  const url = systemProxyUrl();
+  return { url: url, parsed: url ? parseProxy(url) : null };
+}
+
+function applyElectronProxy() {
+  const resolved = resolvedProxy();
+  const config = resolved.parsed
+    ? {
+        proxyRules:
+          (resolved.parsed.type === 'socks5' ? 'socks5://' : 'http://') +
+          resolved.parsed.host +
+          ':' +
+          resolved.parsed.port,
+      }
+    : { mode: 'direct' };
+  try {
+    session.defaultSession.setProxy(config);
+    session.fromPartition(BROWSER_PARTITION).setProxy(config);
+  } catch (err) {
+    /* session may not exist yet; applied again on next start */
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* ---------- Badge and quiet hours                                          */
+/* ------------------------------------------------------------------------- */
+
+function updateBadge(count) {
+  const unread = Number(count) || 0;
+
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setBadge(unread > 0 ? String(unread) : '');
+  }
+
+  if (tray && !tray.isDestroyed()) {
+    tray.setToolTip(unread > 0 ? 'Mmail · ' + unread + ' unread' : 'Mmail');
+  }
+
+  if (!win || win.isDestroyed() || process.platform !== 'win32') return;
+  if (unread <= 0) {
+    win.setOverlayIcon(null, '');
+    return;
+  }
+  const name = (unread > 9 ? '9plus' : String(unread)) + '.png';
+  const image = nativeImage.createFromPath(path.join(ASSETS, 'badges', name));
+  win.setOverlayIcon(image.isEmpty() ? null : image, unread + ' unread');
+}
+
+function totalUnread() {
+  return store.data.accounts.reduce(
+    (sum, account) => sum + ((account.lastCheck && account.lastCheck.unread) || 0),
+    0
+  );
+}
+
+function minutesOfDay(text, fallback) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(text || ''));
+  if (!match) return fallback;
+  return Math.min(1439, Math.max(0, Number(match[1]) * 60 + Number(match[2])));
+}
+
+function inQuietHours(now) {
+  const quiet = store.quietHours;
+  if (!quiet.enabled) return false;
+  const date = now || new Date();
+  const current = date.getHours() * 60 + date.getMinutes();
+  const start = minutesOfDay(quiet.start, 22 * 60);
+  const end = minutesOfDay(quiet.end, 8 * 60);
+  if (start === end) return false;
+  return start < end ? current >= start && current < end : current >= start || current < end;
 }
 
 function snapshot() {
@@ -363,6 +493,7 @@ async function runCheck(options) {
   const accounts = store.data.accounts.slice();
   for (const account of accounts) {
     const config = await store.connectionOf(account);
+    config.proxy = resolvedProxy().parsed;
     if (!config.secret) {
       firstError = firstError || { code: 'err.auth' };
       continue;
@@ -397,11 +528,14 @@ async function runCheck(options) {
     error: firstError,
   };
   broadcast();
+  updateBadge(totalUnread());
   return snapshot();
 }
 
 function notifyNewMail(account, messages) {
   if (!Notification.isSupported()) return;
+  if (account.notify === false) return;
+  if (inQuietHours(new Date())) return;
 
   const lang = store.data.ui.lang === 'en' ? 'en' : 'zh';
   const strings = NOTIFY[lang];
@@ -584,6 +718,113 @@ function openInAppBrowser(url, bounds) {
   return browserState();
 }
 
+/* ------------------------------------------------------------------------- */
+/* ---------- Update check and diagnostics                                   */
+/* ------------------------------------------------------------------------- */
+
+const RELEASES_URL = 'https://github.com/MiCake233/Mmail/releases';
+
+function versionTokens(value) {
+  const text = String(value || '').replace(/^v/, '');
+  const parts = text.split('-');
+  const core = parts[0];
+  const pre = parts.slice(1).join('-');
+  const nums = core.split('.').map((piece) => Number(piece) || 0);
+  while (nums.length < 3) nums.push(0);
+  return { nums: nums, pre: pre };
+}
+
+function compareVersions(a, b) {
+  const left = versionTokens(a);
+  const right = versionTokens(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (left.nums[i] !== right.nums[i]) return left.nums[i] > right.nums[i] ? 1 : -1;
+  }
+  if (!left.pre && right.pre) return 1;
+  if (left.pre && !right.pre) return -1;
+  if (left.pre === right.pre) return 0;
+
+  const leftPre = left.pre.split('.');
+  const rightPre = right.pre.split('.');
+  const length = Math.max(leftPre.length, rightPre.length);
+  for (let i = 0; i < length; i += 1) {
+    const l = leftPre[i] || '';
+    const r = rightPre[i] || '';
+    if (l === r) continue;
+    const ln = Number(l);
+    const rn = Number(r);
+    if (!Number.isNaN(ln) && !Number.isNaN(rn)) return ln > rn ? 1 : -1;
+    return l > r ? 1 : -1;
+  }
+  return 0;
+}
+
+async function checkForUpdate() {
+  try {
+    const response = await net.fetch('https://api.github.com/repos/MiCake233/Mmail/releases?per_page=10', {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Mmail' },
+    });
+    if (!response.ok) {
+      return { ok: false, error: { code: 'err.network', detail: 'HTTP ' + response.status } };
+    }
+    const releases = await response.json();
+    const versions = (Array.isArray(releases) ? releases : [])
+      .map((entry) => String(entry.tag_name || '').replace(/^v/, ''))
+      .filter(Boolean)
+      .sort(compareVersions);
+    const latest = versions[versions.length - 1] || '';
+    const hasUpdate = Boolean(latest) && compareVersions(latest, app.getVersion()) > 0;
+    store.setUi({ latestVersion: hasUpdate ? latest : '' });
+    broadcast();
+    return {
+      ok: true,
+      current: app.getVersion(),
+      latest: latest,
+      hasUpdate: hasUpdate,
+      url: RELEASES_URL,
+    };
+  } catch (err) {
+    return { ok: false, error: { code: 'err.network', detail: String((err && err.message) || err).slice(0, 160) } };
+  }
+}
+
+function diagnosticsText() {
+  const proxy = store.proxy;
+  const quiet = store.quietHours;
+  const lines = [];
+  lines.push('Mmail ' + app.getVersion());
+  lines.push('platform: ' + process.platform + ' ' + process.arch);
+  lines.push(
+    'versions: electron ' + process.versions.electron + ', chromium ' + process.versions.chrome + ', node ' + process.versions.node
+  );
+  lines.push('proxy: ' + proxy.mode + (proxy.url ? ' (' + proxy.url + ')' : ''));
+  lines.push(
+    'alerts: enabled=' +
+      Boolean(store.data.mail.enabled) +
+      ', interval=' +
+      store.data.mail.intervalMinutes +
+      'min, quiet=' +
+      (quiet.enabled ? quiet.start + '-' + quiet.end : 'off')
+  );
+  lines.push('accounts: ' + store.data.accounts.length);
+  store.data.accounts.forEach((account) => {
+    const last = account.lastCheck || {};
+    lines.push(
+      '  - ' +
+        account.email +
+        ' @ ' +
+        account.host +
+        ':' +
+        account.port +
+        ' notify=' +
+        (account.notify !== false) +
+        ' last=' +
+        (last.ok ? 'ok unread=' + (last.unread || 0) : 'error ' + ((last.error && last.error.code) || 'unknown'))
+    );
+  });
+  return lines.join('\n');
+}
+
 function registerIpc() {
   ipcMain.handle('app:get-state', () => snapshot());
 
@@ -603,6 +844,28 @@ function registerIpc() {
       case 'intervalMinutes':
         store.setMail({ intervalMinutes: clampInterval(value) });
         scheduleChecks();
+        break;
+      case 'quietHours':
+        store.setMail({
+          quietHours: {
+            enabled: Boolean(value && value.enabled),
+            start: String((value && value.start) || '22:00'),
+            end: String((value && value.end) || '08:00'),
+          },
+        });
+        break;
+      case 'proxy':
+        store.setApp({
+          proxy: {
+            mode: ['system', 'direct', 'custom'].includes(value && value.mode) ? value.mode : 'system',
+            url: String((value && value.url) || ''),
+          },
+        });
+        applyElectronProxy();
+        break;
+      case 'updateCheck':
+        store.setUi({ updateCheck: Boolean(value) });
+        if (value) checkForUpdate();
         break;
       default:
         break;
@@ -654,6 +917,34 @@ function registerIpc() {
   ipcMain.handle('mail:check-now', async () => {
     await runCheck({ manual: true });
     return snapshot();
+  });
+
+  ipcMain.handle('update:check', () => checkForUpdate());
+
+  ipcMain.handle('diag:copy', () => {
+    try {
+      clipboard.writeText(diagnosticsText());
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: { code: 'err.unknown', detail: String((err && err.message) || err) } };
+    }
+  });
+
+  ipcMain.handle('mail:set-account-notify', (event, id, notify) => {
+    store.updateAccount(String(id || ''), { notify: Boolean(notify) });
+    broadcast();
+    return snapshot();
+  });
+
+  ipcMain.handle('browser:clear', async () => {
+    try {
+      const target = session.fromPartition(BROWSER_PARTITION);
+      await target.clearStorageData();
+      await target.clearCache();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: { code: 'err.unknown', detail: String((err && err.message) || err).slice(0, 160) } };
+    }
   });
 
   ipcMain.handle('shell:open-external', (event, url) => {
@@ -718,6 +1009,14 @@ async function start() {
   createWindow(hidden);
   createTray();
   scheduleChecks();
+  applyElectronProxy();
+  updateBadge(totalUnread());
+
+  if (store.data.ui.updateCheck) {
+    setTimeout(() => {
+      checkForUpdate();
+    }, 8000);
+  }
 
   /* Check shortly after start, once other startup programs settle */
   setTimeout(() => {

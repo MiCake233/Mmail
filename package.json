@@ -1,7 +1,7 @@
 {
   "name": "mmail",
   "productName": "Mmail",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "private": true,
   "description": "Mmail — a launcher for mainstream mail sign-in pages with optional new-mail alerts. Beta.",
   "license": "MIT",
@@ -50,11 +50,17 @@
     "asar": true,
     "npmRebuild": false,
     "win": {
-      "target": ["zip"],
+      "target": [
+        "nsis",
+        "zip"
+      ],
       "icon": "build/icon.png"
     },
     "mac": {
-      "target": ["zip", "dmg"],
+      "target": [
+        "zip",
+        "dmg"
+      ],
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
       "identity": null,
@@ -62,10 +68,22 @@
       "gatekeeperAssess": false
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Utility",
       "icon": "build/icon.png",
       "maintainer": "MiCake233 <jaodephanie@gmail.com>"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Mmail",
+      "artifactName": "${productName}-${version}-setup.${ext}"
     }
   }
 }

@@ -52,11 +52,192 @@ function detailOf(result) {
   return (match ? match[1] + ' ' + match[2] : last).replace(/^\* /, '').slice(0, 200);
 }
 
+/* ------------------------------------------------------------------------- */
+/* Proxy transports                                                         */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Parse proxy URLs such as socks5://127.0.0.1:7890 or http://proxy:8080.
+ * Returns null when the value is empty or unsupported.
+ */
+function parseProxy(raw) {
+  if (!raw) return null;
+  try {
+    const url = new URL(String(raw));
+    if (url.protocol !== 'socks5:' && url.protocol !== 'socks5h:' && url.protocol !== 'http:') return null;
+    return {
+      type: url.protocol === 'http:' ? 'http' : 'socks5',
+      host: url.hostname,
+      port: Number(url.port) || (url.protocol === 'http:' ? 8080 : 1080),
+      username: decodeURIComponent(url.username || ''),
+      password: decodeURIComponent(url.password || ''),
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * One long-lived data listener with an internal buffer.
+ * Detaching and reattaching "data" handlers between protocol steps loses
+ * chunks that arrive in the gap, so the handshake reads through this reader.
+ */
+function createSocketReader(socket) {
+  let buffer = Buffer.alloc(0);
+  let waiting = null;
+
+  const settle = (error, value) => {
+    if (!waiting) return;
+    const current = waiting;
+    waiting = null;
+    if (error) current.reject(error);
+    else current.resolve(value);
+  };
+
+  const flush = () => {
+    if (!waiting || buffer.length < waiting.size) return;
+    const head = buffer.subarray(0, waiting.size);
+    buffer = buffer.subarray(waiting.size);
+    settle(null, head);
+  };
+
+  const onData = (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    flush();
+  };
+  const onError = (err) => settle(translate(err));
+  const onClose = () => settle(new ImapError('err.network'));
+
+  socket.on('data', onData);
+  socket.on('error', onError);
+  socket.on('close', onClose);
+
+  return {
+    read(size) {
+      return new Promise((resolve, reject) => {
+        waiting = { size: size, resolve: resolve, reject: reject };
+        flush();
+      });
+    },
+    dispose() {
+      socket.removeListener('data', onData);
+      socket.removeListener('error', onError);
+      socket.removeListener('close', onClose);
+      /* Hand leftovers to the IMAP parser. */
+      if (buffer.length > 0) socket.unshift(buffer);
+      buffer = Buffer.alloc(0);
+    },
+  };
+}
+
+/** RFC 1928 / RFC 1929 handshake. */
+async function socks5Connect(socket, reader, host, port, proxy) {
+  const wantsAuth = Boolean(proxy.username);
+  socket.write(Buffer.from(wantsAuth ? [0x05, 0x02, 0x00, 0x02] : [0x05, 0x01, 0x00]));
+
+  const greeting = await reader.read(2);
+  if (greeting[0] !== 0x05) throw new ImapError('err.proxy', 'unexpected socks version');
+  const method = greeting[1];
+
+  if (method === 0x02) {
+    const user = Buffer.from(proxy.username, 'utf8');
+    const pass = Buffer.from(proxy.password, 'utf8');
+    socket.write(Buffer.concat([Buffer.from([0x01, user.length]), user, Buffer.from([pass.length]), pass]));
+    const reply = await reader.read(2);
+    if (reply[1] !== 0x00) throw new ImapError('err.proxy', 'socks authentication failed');
+  } else if (method !== 0x00) {
+    throw new ImapError('err.proxy', 'no acceptable socks method');
+  }
+
+  const hostBytes = Buffer.from(host, 'utf8');
+  const portBytes = Buffer.from([(port >> 8) & 0xff, port & 0xff]);
+  socket.write(Buffer.concat([Buffer.from([0x05, 0x01, 0x00, 0x03, hostBytes.length]), hostBytes, portBytes]));
+
+  const head = await reader.read(4);
+  if (head[1] !== 0x00) throw new ImapError('err.proxy', 'socks connect failed (' + head[1] + ')');
+
+  const addressType = head[3];
+  let addressLength = 0;
+  if (addressType === 0x01) addressLength = 4;
+  else if (addressType === 0x04) addressLength = 16;
+  else if (addressType === 0x03) {
+    const lengthByte = await reader.read(1);
+    addressLength = lengthByte[0];
+  } else {
+    throw new ImapError('err.proxy', 'socks address type ' + addressType);
+  }
+  await reader.read(addressLength + 2);
+
+  if (DEBUG) console.error('[socks] tunnel established to ' + host + ':' + port);
+}
+
+/** HTTP CONNECT tunnel. */
+async function httpConnect(socket, reader, host, port, proxy) {
+  const credentials = proxy.username
+    ? 'Proxy-Authorization: Basic ' +
+      Buffer.from(proxy.username + ':' + proxy.password, 'utf8').toString('base64') +
+      '\r\n'
+    : '';
+  socket.write(
+    'CONNECT ' + host + ':' + port + ' HTTP/1.1\r\n' +
+      'Host: ' + host + ':' + port + '\r\n' +
+      credentials +
+      'Proxy-Connection: keep-alive\r\n\r\n'
+  );
+
+  let head = Buffer.alloc(0);
+  while (head.indexOf('\r\n\r\n') === -1) {
+    head = Buffer.concat([head, await reader.read(1)]);
+    if (head.length > 16384) throw new ImapError('err.proxy', 'proxy response too large');
+  }
+
+  const status = head.toString('latin1').split('\r\n')[0] || '';
+  if (!/ 200/.test(status)) {
+    throw new ImapError('err.proxy', status.replace(/^HTTP\/1\.[01] /, '').slice(0, 80));
+  }
+}
+
+function openProxySocket(host, port, proxy) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: proxy ? proxy.host : host, port: proxy ? proxy.port : port });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new ImapError('err.timeout'));
+    }, TIMEOUT_MS);
+
+    socket.once('error', (err) => {
+      clearTimeout(timer);
+      reject(translate(err));
+    });
+
+    socket.once('connect', async () => {
+      let reader = null;
+      try {
+        if (proxy) {
+          reader = createSocketReader(socket);
+          if (proxy.type === 'socks5') await socks5Connect(socket, reader, host, port, proxy);
+          else await httpConnect(socket, reader, host, port, proxy);
+          reader.dispose();
+        }
+        clearTimeout(timer);
+        socket.setTimeout(0);
+        resolve(socket);
+      } catch (err) {
+        clearTimeout(timer);
+        if (reader) reader.dispose();
+        socket.destroy();
+        reject(err instanceof ImapError ? err : translate(err));
+      }
+    });
+  });
+}
+
 class ImapClient {
   constructor(options) {
     this.host = options.host;
     this.port = Number(options.port) || 993;
     this.secure = options.secure !== false;
+    this.proxy = options.proxy || null;
 
     this.socket = null;
     this.buffer = Buffer.alloc(0);
@@ -81,21 +262,26 @@ class ImapClient {
 
   /* ---------- Connection ---------- */
 
-  connect() {
+  async connect() {
+    let raw;
+    try {
+      raw = await openProxySocket(this.host, this.port, this.proxy);
+    } catch (err) {
+      this.failure = translate(err);
+      throw this.failure;
+    }
+
+    const socket = this.secure ? tls.connect({ socket: raw, servername: this.host }) : raw;
+    this.socket = socket;
+    socket.setNoDelay(true);
+    socket.setTimeout(TIMEOUT_MS);
+
     return new Promise((resolve, reject) => {
       const onError = (err) => {
         const error = translate(err);
         this.failure = error;
         reject(error);
       };
-      const socket = this.secure
-        ? tls.connect({ host: this.host, port: this.port, servername: this.host })
-        : net.connect({ host: this.host, port: this.port });
-
-      this.socket = socket;
-      socket.setNoDelay(true);
-      socket.setTimeout(TIMEOUT_MS);
-
       socket.once('error', onError);
       socket.once('timeout', () => {
         const error = new ImapError('err.timeout');
@@ -104,8 +290,7 @@ class ImapClient {
         reject(error);
       });
 
-      const event = this.secure ? 'secureConnect' : 'connect';
-      socket.once(event, () => {
+      const attach = () => {
         socket.removeListener('error', onError);
         socket.on('error', (err) => this.fail(translate(err)));
         socket.on('close', () => this.fail(new ImapError('err.network')));
@@ -124,7 +309,11 @@ class ImapClient {
         }, TIMEOUT_MS);
 
         this.greetingPromise.then(resolve, reject);
-      });
+      };
+
+      /* A proxied connection is already open before TLS wraps it. */
+      if (this.secure) socket.once('secureConnect', attach);
+      else attach();
     });
   }
 
@@ -496,6 +685,7 @@ function toPublicError(err) {
 module.exports = {
   ImapClient,
   ImapError,
+  parseProxy,
   probe,
   parseHeaders,
   decodeWords,

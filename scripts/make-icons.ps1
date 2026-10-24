@@ -185,4 +185,41 @@ if (Test-Path $androidRes) {
   }
 }
 
+# Taskbar overlay badges (unread 1..9 and 9+) used by win.setOverlayIcon
+$badgeDir = Join-Path $assets 'badges'
+if (-not (Test-Path $badgeDir)) { New-Item -ItemType Directory -Path $badgeDir -Force | Out-Null }
+
+function New-BadgeBitmap {
+  param([string]$Text)
+  $bmp = New-Object System.Drawing.Bitmap(32, 32, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
+  $g.Clear([System.Drawing.Color]::Transparent)
+  $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 214, 69, 63))
+  $g.FillEllipse($brush, 1, 1, 30, 30)
+  $fontSize = 17
+  if ($Text.Length -gt 1) { $fontSize = 14 }
+  $font = New-Object System.Drawing.Font('Segoe UI', $fontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+  $format = New-Object System.Drawing.StringFormat
+  $format.Alignment = [System.Drawing.StringAlignment]::Center
+  $format.LineAlignment = [System.Drawing.StringAlignment]::Center
+  $rect = New-Object System.Drawing.RectangleF(0, 0, 32, 32)
+  $g.DrawString($Text, $font, [System.Drawing.Brushes]::White, $rect, $format)
+  $font.Dispose()
+  $brush.Dispose()
+  $g.Dispose()
+  return $bmp
+}
+
+for ($n = 1; $n -le 9; $n++) {
+  $badgeBitmap = New-BadgeBitmap -Text ([string]$n)
+  $badgeBitmap.Save((Join-Path $badgeDir ($n.ToString() + '.png')), [System.Drawing.Imaging.ImageFormat]::Png)
+  $badgeBitmap.Dispose()
+}
+$ninePlus = New-BadgeBitmap -Text '9+'
+$ninePlus.Save((Join-Path $badgeDir '9plus.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$ninePlus.Dispose()
+Write-Host ('wrote badges to ' + $badgeDir)
+
 Write-Host 'done'

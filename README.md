@@ -1,6 +1,6 @@
 # Mmail
 
-**Status: beta** · version `0.1.0-beta.5` · MIT
+**Status: beta** · version `0.1.0-beta.6` · MIT
 
 A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstream mail providers into one searchable page, and can optionally poll a mailbox over IMAP and raise a desktop notification. It ships as an Electron desktop application, a static web build, and an Android shell.
 
@@ -45,13 +45,19 @@ Mail alerts depend on third-party IMAP servers and on network conditions outside
 - Desktop: tray residency, launch at login, native notifications that open the provider's webmail on click.
 - Keyboard: `/` focuses search, `↑` / `↓` moves between entries, `Enter` opens, `Esc` closes panels.
 - Embedded browser: mail pages open inside the application in a sandboxed view, with back, forward, reload and a one-click switch to the system browser.
+- Quiet hours and per-account mute: suppress notifications inside a chosen window; unread counts and dots keep updating.
+- Proxy support: system, direct, or a custom SOCKS5 / HTTP proxy, shared by mail checks and the embedded browser.
+- Unread badge on the Windows taskbar and the macOS dock, plus a tray tooltip.
+- Optional update check against GitHub releases; off by default.
+- Diagnostics: one click copies version, platform, proxy mode and per-account results to the clipboard.
+- Clear the embedded browser cookies and cache from the settings.
 - Web build: static files; a service worker caches the shell so the launcher opens offline.
 
 ## Platform support
 
 | Platform | Package | Launch at login | Notes |
 | --- | --- | --- | --- |
-| Windows 10/11 x64 | portable zip | Run key (`HKCU\…\Run`) | Tray, native notifications |
+| Windows 10/11 x64 | installer, portable zip | Run key (`HKCU\…\Run`) | Tray, native notifications, taskbar badge |
 | macOS 12+ (arm64 / x64) | dmg, zip | Login Items | Best-effort builds; version may lag behind. Unsigned, allow on first launch |
 | Linux x64 | AppImage, deb | XDG autostart entry (`~/.config/autostart/mmail.desktop`) | Needs libsecret for credential encryption, libnotify for notifications, libappindicator for the tray |
 | Android 7+ | apk | — | WebView shell; alerts are desktop-only |
@@ -67,6 +73,10 @@ install `libsecret` and a keyring to avoid that fallback.
 - For Android: Android Studio (see `android/README.md`).
 
 ## Install and run
+
+Two Windows packages are published: `Mmail-<version>-setup.exe` (per-user installer with a Start Menu entry, a desktop shortcut and an uninstaller) and `Mmail-<version>-win-x64.zip` (portable, no installation). Both are unsigned, so Windows SmartScreen may warn on first launch.
+
+From source:
 
 ```bash
 git clone https://github.com/MiCake233/Mmail.git
@@ -121,6 +131,10 @@ Implementation constraints:
 
 ## Privacy and security
 
+- The optional update check is off by default. When enabled it requests the public GitHub releases API once per start, sending no identifiers.
+- Proxy settings stay local. The embedded browser does not support proxy authentication (a Chromium limitation); use an unauthenticated proxy for it.
+- Diagnostic text is generated only when the copy button is pressed; it is placed on the clipboard and never uploaded.
+
 - No network activity other than the IMAP connections the user configures and the provider pages the user opens.
 - App passwords are encrypted with Electron `safeStorage` (DPAPI / Keychain / Secret Service) and written to `mmail.json` in the application's userData directory. When OS encryption is unavailable the value is stored Base64-encoded and flagged in the record.
 - The renderer runs with `contextIsolation: true` and `nodeIntegration: false`, and can only call the whitelisted preload bridge.
@@ -164,6 +178,9 @@ npm run dist        # electron-builder: zip / dmg / AppImage / deb into release/
 
 ## Known limitations
 
+- The unread badge is implemented for Windows (taskbar) and macOS (dock); Linux has no equivalent.
+- The embedded browser cannot pass proxy credentials; authenticated proxies work for IMAP only.
+
 - The embedded browser is desktop-only; the web and Android builds hand links to the system browser.
 - macOS packages are built on a best-effort basis and may lag behind Windows, Linux and Android.
 - Google and Microsoft may block sign-in inside the embedded view; use the system-browser action for those accounts.
@@ -187,7 +204,7 @@ MIT. See [LICENSE](./LICENSE).
 
 # 中文简介
 
-**状态：测试版（beta）** · 版本 `0.1.0-beta.5` · MIT
+**状态：测试版（beta）** · 版本 `0.1.0-beta.6` · MIT
 
 Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方登录页汇总到一页，可搜索、可筛选；桌面版可选地通过 IMAP 轮询收件箱并弹出系统通知。项目同时提供 Electron 桌面应用、静态网页版与安卓外壳。
 
@@ -227,13 +244,19 @@ macOS 包未签名、未公证。首次打开请在右键菜单中选择「打�
 - 桌面版：托盘常驻、开机自启动、系统通知（点击通知打开对应邮箱网页）。
 - 键盘：`/` 聚焦搜索，`↑` / `↓` 在条目间移动，`Enter` 打开，`Esc` 关闭面板。
 - 内置浏览器：邮件页面在应用内的沙箱视图中打开，支持后退、前进、刷新，并可一键改用系统浏览器。
+- 免打扰时段与账号静音：在设定时间窗内不弹通知，未读数与红点照常更新。
+- 代理支持：系统 / 直连 / 自定义（SOCKS5、HTTP），收件提醒与内置浏览器共用。
+- 未读角标：Windows 任务栏与 macOS Dock，另有托盘提示。
+- 可选的更新检查（对接 GitHub Release），默认关闭。
+- 诊断导出：一键复制版本、平台、代理模式与各账号检查结果。
+- 可清除内置浏览器的 Cookie 与缓存。
 - 网页版：纯静态文件，Service Worker 缓存外壳以支持离线打开。
 
 ## 平台支持
 
 | 平台 | 安装包 | 开机自启动 | 说明 |
 | --- | --- | --- | --- |
-| Windows 10/11 x64 | 便携版 zip | 注册表 Run 项 | 托盘、系统通知 |
+| Windows 10/11 x64 | 安装包、便携版 zip | 注册表 Run 项 | 托盘、系统通知、任务栏角标 |
 | macOS 12+（arm64 / x64） | dmg、zip | 登录项（Login Items） | 按需构建，版本可能落后；未签名，首次需放行 |
 | Linux x64 | AppImage、deb | XDG 自启动项（`~/.config/autostart/mmail.desktop`） | 凭据加密需 libsecret，通知需 libnotify，托盘需 libappindicator |
 | Android 7+ | apk | — | WebView 外壳，收件提醒仅桌面版 |
@@ -242,6 +265,10 @@ Linux 上若没有 Secret Service（gnome-keyring 或 KWallet），Electron 无�
 此时 Mmail 以 Base64 保存，并在设置列表中标注该账号；安装 `libsecret` 与密钥环即可避免。
 
 ## 安装与运行
+
+Windows 提供两种包：`Mmail-<version>-setup.exe`（按用户安装，含开始菜单项、桌面快捷方式与卸载器）与 `Mmail-<version>-win-x64.zip`（便携版，免安装）。两者均未签名，首次运行可能触发 SmartScreen 提示。
+
+从源码运行：
 
 ```bash
 git clone https://github.com/MiCake233/Mmail.git
@@ -293,6 +320,10 @@ $env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'; npm install
 
 ## 隐私与安全
 
+- 可选的更新检查默认关闭。开启后每次启动请求一次 GitHub 公开的 Release 接口，不携带任何标识信息。
+- 代理设置仅保存在本机。内置浏览器不支持代理认证（Chromium 限制），请给它使用无需认证的代理。
+- 诊断文本只在你按下复制按钮时生成，写入剪贴板，不会上传。
+
 - 除用户自行配置的 IMAP 连接与用户打开的官方页面外，无其他网络行为。
 - 授权码使用 Electron `safeStorage`（DPAPI / Keychain / Secret Service）加密后写入应用 userData 目录下的 `mmail.json`；系统加密不可用时以 Base64 保存并在记录中标记。
 - 渲染层开启 `contextIsolation`、关闭 `nodeIntegration`，只能调用 preload 白名单方法。
@@ -313,6 +344,9 @@ npm run dist        # 使用 electron-builder 产出 zip / dmg / AppImage / deb 
 `npm run check` 在源码注释不是英文时会失败；语言数据（`locales.js`、`electron/strings.js` 中的 `zh` 表）除外。
 
 ## 已知限制
+
+- 未读角标仅实现 Windows 任务栏与 macOS Dock；Linux 无对应机制。
+- 内置浏览器无法传代理凭据；需要认证的代理仅对 IMAP 生效。
 
 - 内置浏览器仅桌面版可用；网页版与安卓版仍交给系统浏览器。
 - macOS 包按条件构建，版本可能落后于 Windows、Linux 与 Android。
