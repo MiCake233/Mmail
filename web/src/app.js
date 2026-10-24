@@ -826,7 +826,7 @@
   }
 
   function renderAboutTab() {
-    const version = state.desktop.appVersion || '0.1.0-beta.2';
+    const version = state.desktop.appVersion || '0.1.0-beta.3';
     return (
       '<div class="field">' +
         '<div class="field-label">Mmail</div>' +
