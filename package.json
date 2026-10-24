@@ -1,0 +1,29 @@
+{
+  "name": "mmail",
+  "productName": "Mmail",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "description": "Mmail — a launcher for mainstream mail sign-in pages with optional new-mail alerts. Beta.",
+  "license": "MIT",
+  "homepage": "https://github.com/MiCake233/Mmail",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MiCake233/Mmail.git"
+  },
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "web": "node scripts/serve.mjs",
+    "check": "node scripts/check.mjs",
+    "test:imap": "node scripts/test-imap.mjs",
+    "test:store": "electron scripts/test-store.js",
+    "icons": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-icons.ps1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}

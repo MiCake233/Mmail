@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mmail</title>
+    <meta
+      name="description"
+      content="Mmail — a launcher for mainstream mail sign-in pages. Beta. No credentials are collected."
+    />
+    <meta name="theme-color" content="#f4f6fb" />
+    <link rel="icon" type="image/png" href="./assets/icon-192.png" />
+    <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./src/styles.css" />
+
+    <!-- Apply the stored theme before first paint / no flash of the wrong scheme -->
+    <script>
+      (function () {
+        try {
+          var mode = window.localStorage.getItem('mmail.themeMode');
+          var dark =
+            mode === 'dark' ||
+            (mode !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        } catch (err) {
+          /* private mode: keep the default */
+        }
+      })();
+    </script>
+
+    <script src="./src/providers.js" defer></script>
+    <script src="./src/locales.js" defer></script>
+    <script src="./src/i18n.js" defer></script>
+    <script src="./src/app.js" defer></script>
+  </head>
+
+  <body>
+    <div class="page">
+      <header class="topbar">
+        <a class="brand" href="./index.html" aria-label="Mmail">
+          <span class="brand-mark" aria-hidden="true">
+            <img src="./assets/icon-192.png" alt="" width="40" height="40" />
+          </span>
+          <span class="brand-text">
+            <strong>Mmail</strong>
+            <small data-i18n="app.tagline">Mail entries</small>
+          </span>
+          <span class="beta-badge" title="Beta">Beta</span>
+        </a>
+
+        <div class="topbar-actions">
+          <button
+            class="ghost-btn"
+            id="lang-toggle"
+            type="button"
+            data-i18n="topbar.lang"
+            data-i18n-title="topbar.langTitle"
+            title="Switch to Chinese"
+          >
+            中文
+          </button>
+          <button class="icon-btn" id="theme-toggle" type="button" data-i18n-title="topbar.theme" title="Toggle theme">
+            <svg
+              class="icon-moon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M20.2 14.6A8.4 8.4 0 0 1 9.4 3.8 8.6 8.6 0 1 0 20.2 14.6Z" />
+            </svg>
+            <svg
+              class="icon-sun"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4.1" />
+              <path d="M12 2.6v2.1M12 19.3v2.1M4.5 4.5 6 6M18 18l1.5 1.5M2.6 12h2.1M19.3 12h2.1M4.5 19.5 6 18M18 6l1.5-1.5" />
+            </svg>
+          </button>
+          <button
+            class="icon-btn"
+            id="settings-toggle"
+            type="button"
+            data-i18n-aria="topbar.settings"
+            aria-label="Settings"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 7h5.2M13.6 7H20M4 17h6.2M14.6 17H20" />
+              <circle cx="11.4" cy="7" r="2.2" />
+              <circle cx="12.4" cy="17" r="2.2" />
+            </svg>
+          </button>
+          <a
+            class="ghost-btn gh-link"
+            href="https://github.com/MiCake233/Mmail"
+            target="_blank"
+            rel="noopener noreferrer"
+            >GitHub</a
+          >
+        </div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <h1>
+            <span data-i18n="hero.titleLead">Every mailbox, </span><span class="grad" data-i18n="hero.titleAccent">one click away</span>
+          </h1>
+          <p id="hero-subtitle"></p>
+        </section>
+
+        <div class="toolbar">
+          <div class="search">
+            <svg
+              class="search-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="6.4" />
+              <path d="m16.2 16.2 4.1 4.1" />
+            </svg>
+            <input
+              id="q"
+              class="search-input"
+              type="search"
+              data-i18n-ph="search.placeholder"
+              data-i18n-aria="search.aria"
+              placeholder="Search mail, domain or keyword"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+            <kbd class="key-hint" aria-hidden="true">/</kbd>
+            <button class="search-clear" id="clear" type="button" data-i18n-aria="search.clear" aria-label="Clear search" hidden>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.9"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="mailbar" id="mailbar" hidden>
+          <span class="pulse" id="mail-pulse" aria-hidden="true"></span>
+          <span class="mailbar-text" id="mailbar-text"></span>
+          <span class="mailbar-actions">
+            <button class="link-btn" id="mail-check" type="button" data-i18n="mail.checkNow">Check now</button>
+            <button class="link-btn" id="mail-setup" type="button" data-i18n="mail.setup">Add account</button>
+          </span>
+        </div>
+
+        <nav class="chips" id="filters" data-i18n-aria="filter.all" aria-label="Filter by category"></nav>
+
+        <section class="recents" id="recents" hidden>
+          <span class="recents-label" data-i18n="recents.label">Recent</span>
+          <div class="rec-list" id="recents-list"></div>
+        </section>
+
+        <p class="sr-only" id="hint" role="status" aria-live="polite"></p>
+
+        <div id="content"></div>
+      </main>
+
+      <footer class="foot">
+        <p data-i18n="foot.note">Beta · MIT License · official pages only · no credentials collected</p>
+        <p class="foot-links">
+          <a href="https://github.com/MiCake233/Mmail" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <span aria-hidden="true">·</span>
+          <a href="https://github.com/MiCake233/Mmail/issues/new" target="_blank" rel="noopener noreferrer"
+            >Issues</a
+          >
+        </p>
+      </footer>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="modal" id="settings" hidden>
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header class="sheet-head">
+          <h2 id="settings-title" data-i18n="settings.title">Settings</h2>
+          <button class="icon-btn" id="settings-close" type="button" data-close="1" data-i18n-aria="settings.close">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.9"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="sheet-tabs" id="settings-tabs" role="tablist"></div>
+        <div class="sheet-body" id="settings-body"></div>
+      </div>
+    </div>
+  </body>
+</html>

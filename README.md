@@ -1,0 +1,231 @@
+# Mmail
+
+**Status: beta** · version `0.1.0-beta.1` · MIT
+
+A mail sign-in launcher. Mmail collects the official sign-in pages of 27 mainstream mail providers into one searchable page, and can optionally poll a mailbox over IMAP and raise a desktop notification. It ships as an Electron desktop application, a static web build, and an Android shell.
+
+> 中文简介见下方 **中文简介** 一节。
+> A Chinese introduction follows the English text below.
+
+## Scope and legal position
+
+- Mmail does not host, proxy, embed, or render any provider's mailbox or sign-in form. Every entry is a plain hyperlink to the provider's own public sign-in URL; the click is handed to the system browser.
+- No provider logos are bundled. Entries are drawn as a locally generated coloured tile with a short text monogram. Colour values approximate brand colours to aid recognition; they are not official brand codes.
+- Mmail is not affiliated with, endorsed by, or sponsored by any mail provider. Provider names and trademarks belong to their respective owners.
+- There is no backend, no account system, and no telemetry. Web credentials are never requested, captured, or stored; authentication happens entirely on the provider's page.
+- Mail alerts require the user to supply an IMAP app password for their own mailbox. The credential is encrypted with the operating system keystore and used only for local, read-only IMAP checks.
+
+## Beta disclaimer
+
+Mail alerts depend on third-party IMAP servers and on network conditions outside the control of this project. Notifications can be delayed, merged, or missed, and the client can incorrectly report that no new mail exists. Mmail is not a mail delivery service and offers no delivery guarantee. Do not use it as the only notification channel for important or time-critical mail. The authors accept no liability for missed, delayed, or lost messages, or for any consequence of relying on this software.
+
+## Features
+
+- 27 providers: 13 China, 14 international, plus business-mailbox filtering.
+- Search by Chinese name, English name, domain, or alias; favourites, recents, and a local login history.
+- Light and dark themes (system-following by default) and a bilingual interface (Chinese / English).
+- Desktop: tray residency, launch at login, native notifications that open the provider's webmail on click.
+- Keyboard: `/` focuses search, `↑` / `↓` moves between entries, `Enter` opens, `Esc` closes panels.
+- Web build: static files; a service worker caches the shell so the launcher opens offline.
+
+## Requirements
+
+- Node.js 18 or newer, plus npm, for the desktop and web builds.
+- A modern browser for the web build.
+- For Android: Android Studio (see `android/README.md`).
+
+## Install and run
+
+```bash
+git clone https://github.com/MiCake233/Mmail.git
+cd Mmail
+npm install
+npm start        # desktop application
+npm run web      # web build at http://127.0.0.1:5173
+```
+
+If the Electron binary download fails behind a restrictive network, set a mirror before installing:
+
+```bash
+# macOS / Linux
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install
+# Windows PowerShell
+$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'; npm install
+```
+
+## Mail alerts
+
+Alerts use IMAP with an app password, never the account password.
+
+| Provider | Requirement |
+| --- | --- |
+| QQ Mail | Enable IMAP/SMTP in the web settings, then generate an authorization code |
+| NetEase 163 / 126 / yeah | Enable IMAP, then obtain an authorization code |
+| Gmail | Enable two-step verification, then create an app password |
+| iCloud | Create an app-specific password for the Apple ID |
+| Yahoo / AOL / Zoho / Fastmail / Yandex / Naver | Generate an app password in the security settings |
+| Outlook / Microsoft 365 | Password sign-in is disabled (OAuth only); alerts are unsupported and the UI states so |
+
+Open **Settings → Mail alerts → Add account**. Selecting a provider pre-fills the IMAP host and port; the connection is tested before the account is stored.
+
+Implementation constraints:
+
+- Only `BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)]` is fetched. Bodies are not downloaded and messages are not marked as read.
+- The first connection records a baseline UID, so existing mail never triggers alerts.
+- At most three messages per account are summarised in one notification.
+- NetEase servers require the IMAP `ID` extension; it is sent before `SELECT`.
+
+## Privacy and security
+
+- No network activity other than the IMAP connections the user configures and the provider pages the user opens.
+- App passwords are encrypted with Electron `safeStorage` (DPAPI / Keychain / Secret Service) and written to `mmail.json` in the application's userData directory. When OS encryption is unavailable the value is stored Base64-encoded and flagged in the record.
+- The renderer runs with `contextIsolation: true` and `nodeIntegration: false`, and can only call the whitelisted preload bridge.
+- In-app navigation to external origins is blocked; links are opened by the system browser.
+- Local usage data (favourites, history, theme, language) stays in `localStorage`.
+
+## Architecture
+
+```
+mmail/
+├─ electron/         main process: window, tray, launch at login, IPC, notifications,
+│                    minimal IMAP client, encrypted settings store
+├─ web/              renderer shared by desktop, web, and the Android shell
+│  ├─ src/providers.js   provider catalogue (single data source)
+│  ├─ src/locales.js     Chinese and English UI strings
+│  ├─ src/i18n.js        translation factory
+│  ├─ src/app.js         interface logic
+│  └─ src/styles.css     light and dark themes
+├─ android/          WebView shell that bundles web/ as assets
+├─ scripts/          self-check, static server, IMAP and storage tests, icon generator
+└─ assets/           application icons generated from the master artwork
+```
+
+The renderer contains no framework and no build step. Desktop capabilities arrive through `window.mmail`, which the preload script injects; when it is absent the same code runs as a plain web page with entries, favourites, and history only.
+
+## Development
+
+```bash
+npm start           # desktop
+npm run dev         # desktop with DevTools
+npm run web         # web build
+npm run check       # static self-check: syntax, catalogue, locales, markup, comments
+npm run test:imap   # IMAP client regression test against a local fake server
+npm run test:store  # storage and OS-encryption smoke test, runs inside Electron
+npm run icons       # regenerate icons from assets/icon-source.jpg
+```
+
+`npm run check` also fails when a source comment is not in English. Locale data (`locales.js`, the `zh` tables in `electron/strings.js`) is exempt.
+
+## Known limitations
+
+- The Android target is a WebView shell. Background mail alerts are not implemented; the UI states that alerts require the desktop build.
+- Providers without an IMAP preset require the user to enter a host and port.
+- Outlook and Microsoft 365 cannot be used for alerts until OAuth is implemented.
+- Mmail does not send, read, search, or organise mail; it opens pages and reports new-mail headers.
+
+## Roadmap
+
+- Android background alerts (WorkManager, native IMAP, notification channel).
+- OAuth for Microsoft mailboxes, if a dependency-free implementation is practical.
+- Packaged installers via electron-builder.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).
+
+---
+
+# 中文简介
+
+**状态：测试版（beta）** · 版本 `0.1.0-beta.1` · MIT
+
+Mmail 是一个邮箱登录入口启动器。它把 27 家主流邮箱的官方登录页汇总到一页，可搜索、可筛选；桌面版可选地通过 IMAP 轮询收件箱并弹出系统通知。项目同时提供 Electron 桌面应用、静态网页版与安卓外壳。
+
+## 范围与法律定位
+
+- 不托管、不代理、不内嵌任何邮箱的收件箱或登录表单。每个条目只是一个指向服务商官方公开登录地址的普通超链接，点击后交由系统浏览器打开。
+- 不打包任何服务商 logo。条目由本地生成的色块与文字字标组成；颜色仅用于辅助识别，为近似值而非官方品牌色。
+- 与任何邮箱服务商均无隶属、背书或赞助关系。服务商名称与商标归各自所有者。
+- 无后端、无账号体系、无统计上报。不请求、不采集、不保存网页登录凭据；认证完全发生在服务商页面。
+- 收件提醒需要用户自行提供其邮箱的 IMAP 授权码（应用专用密码）。该凭据以操作系统密钥库加密保存，仅用于本机只读检查。
+
+## 测试版声明
+
+收件提醒依赖第三方 IMAP 服务，以及本项目不可控的网络条件。通知可能延迟、合并或漏发，客户端也可能错误地报告“没有新邮件”。Mmail 不是邮件投递服务，不提供任何送达保证。请勿将其作为重要或时效性邮件的唯一提醒渠道。对于漏发、延迟或丢失的邮件及其后果，作者不承担责任。
+
+## 功能
+
+- 27 家邮箱：国内 13 家、国际 14 家，并支持企业邮箱筛选。
+- 可按中文名、英文名、域名或别名搜索；提供收藏、最近访问与本地登录记录。
+- 明暗主题（默认跟随系统），中英双语界面。
+- 桌面版：托盘常驻、开机自启动、系统通知（点击通知打开对应邮箱网页）。
+- 键盘：`/` 聚焦搜索，`↑` / `↓` 在条目间移动，`Enter` 打开，`Esc` 关闭面板。
+- 网页版：纯静态文件，Service Worker 缓存外壳以支持离线打开。
+
+## 安装与运行
+
+```bash
+git clone https://github.com/MiCake233/Mmail.git
+cd Mmail
+npm install
+npm start        # 桌面应用
+npm run web      # 网页版，http://127.0.0.1:5173
+```
+
+若 Electron 二进制下载失败（受限网络环境），安装前设置镜像：
+
+```powershell
+$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'; npm install
+```
+
+## 收件提醒
+
+提醒使用 IMAP 与授权码，不使用登录密码。
+
+| 邮箱 | 需要做什么 |
+| --- | --- |
+| QQ 邮箱 | 网页设置中开启 IMAP/SMTP，生成授权码 |
+| 网易 163 / 126 / yeah | 开启 IMAP，获取授权码 |
+| Gmail | 开启两步验证，创建应用专用密码 |
+| iCloud | 为 Apple ID 创建 App 专用密码 |
+| Yahoo / AOL / Zoho / Fastmail / Yandex / Naver | 在安全设置中生成应用密码 |
+| Outlook / Microsoft 365 | 官方已停用密码登录（仅 OAuth），不支持提醒，界面会明确标注 |
+
+操作路径：**设置 → 收件提醒 → 添加账号**。选择服务商会自动填入 IMAP 地址与端口；保存前会先测试连接。
+
+实现约束：
+
+- 只取 `BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)]`，不下载正文，不标记已读。
+- 首次连接只记录基线 UID，历史邮件不会触发提醒。
+- 每个账号单次通知最多汇总三封邮件。
+- 网易系服务器要求 IMAP `ID` 扩展，客户端在 `SELECT` 前发送。
+
+## 隐私与安全
+
+- 除用户自行配置的 IMAP 连接与用户打开的官方页面外，无其他网络行为。
+- 授权码使用 Electron `safeStorage`（DPAPI / Keychain / Secret Service）加密后写入应用 userData 目录下的 `mmail.json`；系统加密不可用时以 Base64 保存并在记录中标记。
+- 渲染层开启 `contextIsolation`、关闭 `nodeIntegration`，只能调用 preload 白名单方法。
+- 应用窗口内阻止导航到外部来源，外链交由系统浏览器打开。
+- 收藏、登录记录、主题与语言保存在本地 `localStorage`。
+
+## 开发与自检
+
+```bash
+npm run check       # 静态自检：语法、邮箱数据、文案、结构、注释语言
+npm run test:imap   # IMAP 客户端回归测试（本地假服务器）
+npm run test:store  # 存储与系统加密冒烟测试（在 Electron 内运行）
+npm run icons       # 从 assets/icon-source.jpg 重新生成图标
+```
+
+`npm run check` 在源码注释不是英文时会失败；语言数据（`locales.js`、`electron/strings.js` 中的 `zh` 表）除外。
+
+## 已知限制
+
+- 安卓端为 WebView 外壳，后台收件提醒尚未实现，界面会明确提示需要桌面版。
+- 没有 IMAP 预设的服务商需要手动填写服务器地址与端口。
+- Outlook 与 Microsoft 365 在实现 OAuth 前无法用于提醒。
+- Mmail 不发送、不阅读、不搜索、不整理邮件；它只打开页面并报告新邮件头信息。
+
+## 许可
+
+MIT，见 [LICENSE](./LICENSE)。

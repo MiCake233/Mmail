@@ -1,0 +1,10 @@
+# Normalize line endings so Windows and macOS do not fight over files
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+*.woff2 binary
