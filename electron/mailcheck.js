@@ -18,6 +18,7 @@ const MAX_NOTIFY = 3;
  */
 async function checkMailbox(config) {
   const lastUid = Number(config.lastUid) || 0;
+  const lastValidity = Number(config.uidValidity) || 0;
   const client = new ImapClient(config);
 
   try {
@@ -27,27 +28,35 @@ async function checkMailbox(config) {
 
     const box = await client.select('INBOX');
     const unseen = await client.unseen();
+    const latest = await client.highestUid(box);
+    const uidValidity = Number(box.uidValidity) || 0;
 
-    /* Highest UID currently on the server (uidNext - 1) */
-    const latest = Math.max(0, (box.uidNext || 1) - 1);
+    const baseline = {
+      ok: true,
+      initial: true,
+      unread: unseen.length,
+      newUid: latest,
+      uidValidity: uidValidity,
+      newCount: 0,
+      messages: [],
+    };
 
-    if (!lastUid) {
-      return {
-        ok: true,
-        initial: true,
-        unread: unseen.length,
-        newUid: latest,
-        newCount: 0,
-        messages: [],
-      };
+    /* RFC 3501: a new UIDVALIDITY means every cached UID is meaningless.
+       Reset the baseline instead of treating the rebuilt mailbox as already seen. */
+    if (lastUid && lastValidity && uidValidity && uidValidity !== lastValidity) {
+      return baseline;
     }
+
+    if (!lastUid) return baseline;
 
     const messages = [];
     let newUid = lastUid;
+    let newCount = 0;
 
     if (latest > lastUid) {
       const found = await client.search('UID ' + (lastUid + 1) + ':*');
       const fresh = found.filter((uid) => uid > lastUid).sort((a, b) => a - b);
+      newCount = fresh.length;
 
       if (fresh.length > 0) {
         const picked = fresh.slice(-MAX_NOTIFY);
@@ -69,11 +78,19 @@ async function checkMailbox(config) {
       initial: false,
       unread: unseen.length,
       newUid: Math.max(newUid, lastUid),
-      newCount: messages.length,
+      uidValidity: uidValidity,
+      newCount: newCount,
       messages: messages,
     };
   } catch (err) {
-    return { ok: false, error: toPublicError(err), newUid: lastUid, newCount: 0, messages: [] };
+    return {
+      ok: false,
+      error: toPublicError(err),
+      newUid: lastUid,
+      uidValidity: lastValidity,
+      newCount: 0,
+      messages: [],
+    };
   } finally {
     await client.logout();
     client.destroy();

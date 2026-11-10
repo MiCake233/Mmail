@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { app, safeStorage } = require('electron');
+const { normalizeClock } = require('./clock');
 
 const MAX_ACCOUNTS = 8;
 
@@ -214,6 +215,7 @@ class Store {
       secure: account.secure !== false,
       secret: await decryptSecret(account.secret),
       lastUid: Number(account.lastUid) || 0,
+      uidValidity: Number(account.uidValidity) || 0,
     };
   }
 
@@ -227,8 +229,8 @@ class Store {
     const quiet = this.data.mail.quietHours || {};
     return {
       enabled: Boolean(quiet.enabled),
-      start: /^d{2}:d{2}$/.test(String(quiet.start)) ? String(quiet.start) : '22:00',
-      end: /^d{2}:d{2}$/.test(String(quiet.end)) ? String(quiet.end) : '08:00',
+      start: normalizeClock(quiet.start, '22:00'),
+      end: normalizeClock(quiet.end, '08:00'),
     };
   }
 
