@@ -17,9 +17,11 @@ import assert from 'node:assert/strict';
 
 import imapModule from '../electron/imap.js';
 import mailcheckModule from '../electron/mailcheck.js';
+import clockModule from '../electron/clock.js';
 
-const { parseHeaders, decodeWords, parseProxy } = imapModule;
+const { parseHeaders, decodeWords, parseProxy, formatProxyRule, redactProxyUrl, isValidHost } = imapModule;
 const { checkMailbox } = mailcheckModule;
+const { normalizeClock } = clockModule;
 
 /* ------------------------------------------------------------------ */
 /* Fixtures                                                           */
@@ -42,6 +44,49 @@ const HEADERS = {
 };
 
 const SERVER_UIDS = [10, 11, 12];
+
+const serverState = {
+  uids: SERVER_UIDS.slice(),
+  uidNext: 13,
+  uidValidity: 42,
+  sendUidNext: true,
+  hangCommand: '',
+  hugeLiteral: false,
+  uidAtEnd: false,
+};
+
+function rememberState() {
+  return {
+    uids: serverState.uids.slice(),
+    uidNext: serverState.uidNext,
+    uidValidity: serverState.uidValidity,
+    sendUidNext: serverState.sendUidNext,
+    hangCommand: serverState.hangCommand,
+    hugeLiteral: serverState.hugeLiteral,
+    uidAtEnd: serverState.uidAtEnd,
+  };
+}
+
+function restoreState(saved) {
+  serverState.uids = saved.uids.slice();
+  serverState.uidNext = saved.uidNext;
+  serverState.uidValidity = saved.uidValidity;
+  serverState.sendUidNext = saved.sendUidNext;
+  serverState.hangCommand = saved.hangCommand;
+  serverState.hugeLiteral = saved.hugeLiteral;
+  serverState.uidAtEnd = saved.uidAtEnd;
+}
+
+async function withServer(patch, fn) {
+  const saved = rememberState();
+  if (patch.uids) serverState.uids = patch.uids.slice();
+  Object.assign(serverState, patch, patch.uids ? { uids: serverState.uids } : {});
+  try {
+    await fn();
+  } finally {
+    restoreState(saved);
+  }
+}
 
 /* Minimal SOCKS5 proxy (no auth) used to verify the proxied IMAP path. */
 function startSocksProxy() {
@@ -141,9 +186,12 @@ function handleLine(line, socket, requests) {
       break;
 
     case 'SELECT':
-      socket.write('* 4 EXISTS\r\n');
-      socket.write('* OK [UIDVALIDITY 42] UIDs valid\r\n');
-      socket.write('* OK [UIDNEXT 13] Predicted next UID\r\n');
+      if (serverState.hangCommand === 'SELECT') return;
+      socket.write('* ' + Math.max(serverState.uids.length, 1) + ' EXISTS\r\n');
+      socket.write('* OK [UIDVALIDITY ' + serverState.uidValidity + '] UIDs valid\r\n');
+      if (serverState.sendUidNext) {
+        socket.write('* OK [UIDNEXT ' + serverState.uidNext + '] Predicted next UID\r\n');
+      }
       socket.write('* OK [UNSEEN 10] First unseen\r\n');
       socket.write(tag + ' OK [READ-WRITE] SELECT completed\r\n');
       break;
@@ -155,11 +203,12 @@ function handleLine(line, socket, requests) {
         const range = /^UID (\d+):\*/i.exec(rest);
         if (range) {
           const lower = Number(range[1]);
-          const list = SERVER_UIDS.filter((uid) => uid >= lower);
+          const list = serverState.uids.filter((uid) => uid >= lower);
           /* IMAP semantics: n:* always yields at least the highest UID. */
-          socket.write('* SEARCH ' + (list.length ? list.join(' ') : String(SERVER_UIDS[SERVER_UIDS.length - 1])) + '\r\n');
+          const fallback = serverState.uids.length ? String(serverState.uids[serverState.uids.length - 1]) : '';
+          socket.write('* SEARCH ' + (list.length ? list.join(' ') : fallback) + '\r\n');
         } else {
-          socket.write('* SEARCH ' + SERVER_UIDS.join(' ') + '\r\n');
+          socket.write('* SEARCH ' + serverState.uids.join(' ') + '\r\n');
         }
       }
       socket.write(tag + ' OK SEARCH completed\r\n');
@@ -167,14 +216,31 @@ function handleLine(line, socket, requests) {
     }
 
     case 'FETCH': {
+      if (/^\*\s+\(UID\)\s*$/i.test(rest.trim())) {
+        const last = serverState.uids[serverState.uids.length - 1];
+        if (last) socket.write('* 1 FETCH (UID ' + last + ')\r\n');
+        socket.write(tag + ' OK FETCH completed\r\n');
+        break;
+      }
+      if (serverState.hugeLiteral) {
+        socket.write('* 1 FETCH (UID 1 BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {999999999}\r\n');
+        socket.write(tag + ' OK FETCH completed\r\n');
+        break;
+      }
       const uidList = (/(\d+(?:,\d+)*)/.exec(rest) || [, ''])[1];
       const uids = uidList ? uidList.split(',').map(Number) : [];
       uids.forEach((uid, index) => {
         const header = HEADERS[uid] || 'Subject: (none)\r\n\r\n';
         const literal = Buffer.from(header, 'latin1');
-        socket.write('* ' + (index + 1) + ' FETCH (UID ' + uid + ' BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {' + literal.length + '}\r\n');
-        socket.write(literal);
-        socket.write(')\r\n');
+        if (serverState.uidAtEnd) {
+          socket.write('* ' + (index + 1) + ' FETCH (BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {' + literal.length + '}\r\n');
+          socket.write(literal);
+          socket.write(' UID ' + uid + ')\r\n');
+        } else {
+          socket.write('* ' + (index + 1) + ' FETCH (UID ' + uid + ' BODY[HEADER.FIELDS (FROM SUBJECT DATE)] {' + literal.length + '}\r\n');
+          socket.write(literal);
+          socket.write(')\r\n');
+        }
       });
       socket.write(tag + ' OK FETCH completed\r\n');
       break;
@@ -238,6 +304,43 @@ await test('decodeWords: plain text and empty input', () => {
   assert.equal(decodeWords(''), '');
 });
 
+await test('quiet hours keep a real HH:MM and reject the broken literal pattern', () => {
+  assert.equal(normalizeClock('09:30', '22:00'), '09:30');
+  assert.equal(normalizeClock('22:00', '22:00'), '22:00');
+  assert.equal(normalizeClock('08:00', '08:00'), '08:00');
+  assert.equal(normalizeClock('dd:dd', '22:00'), '22:00');
+  assert.equal(normalizeClock('25:00', '22:00'), '22:00');
+  assert.equal(normalizeClock('09:60', '08:00'), '08:00');
+  assert.equal(normalizeClock('', '22:00'), '22:00');
+});
+
+await test('hosts reject control characters and accept normal mail servers', () => {
+  assert.equal(isValidHost('imap.qq.com'), true);
+  assert.equal(isValidHost('127.0.0.1'), true);
+  assert.equal(isValidHost('::1'), true);
+  assert.equal(isValidHost('[::1]'), true);
+  assert.equal(isValidHost('localhost'), true);
+  assert.equal(isValidHost('imap.qq.com\r\nLOGIN'), false);
+  assert.equal(isValidHost('imap.qq.com/extra'), false);
+  assert.equal(isValidHost(''), false);
+});
+
+await test('IPv6 proxy hosts are bare for net.connect and bracketed for Chromium', () => {
+  const parsed = parseProxy('socks5://[::1]:1080');
+  assert.equal(parsed.host, '::1');
+  assert.equal(parsed.port, 1080);
+  assert.equal(formatProxyRule(parsed), 'socks5://[::1]:1080');
+  assert.equal(formatProxyRule(parseProxy('http://127.0.0.1:8080')), 'http://127.0.0.1:8080');
+});
+
+await test('diagnostics redact proxy credentials', () => {
+  const redacted = redactProxyUrl('socks5://user:s3cret@127.0.0.1:1080');
+  assert.equal(redacted.includes('s3cret'), false);
+  assert.equal(redacted.includes('user'), false);
+  assert.match(redacted, /127\.0\.0\.1/);
+  assert.equal(redactProxyUrl('s3cret-but-not-a-url'), '(invalid)');
+});
+
 /* Protocol round trips */
 
 const { server, port, requests } = await startFakeServer();
@@ -268,6 +371,94 @@ await test('incremental check: only new UIDs, subjects and senders decoded', asy
   const subjects = result.messages.map((message) => message.subject);
   assert.deepEqual(subjects, ['【测试】你好，世界', '测试', 'hello 你好 world']);
   assert.match(result.messages[0].from, /zhangsan@example\.com/);
+});
+
+await test('more than three new messages keep the real count and summarise three', async () => {
+  await withServer({ uids: [1, 2, 3, 4, 5, 6], uidNext: 7 }, async () => {
+    const result = await checkMailbox(Object.assign({ lastUid: 1 }, baseConfig));
+    assert.equal(result.ok, true, 'error: ' + JSON.stringify(result.error));
+    assert.equal(result.newCount, 5);
+    assert.equal(result.messages.length, 3);
+    assert.equal(result.newUid, 6);
+    assert.deepEqual(
+      result.messages.map((message) => message.uid),
+      [4, 5, 6]
+    );
+  });
+});
+
+await test('UID after the header literal is still decoded', async () => {
+  await withServer({ uidAtEnd: true }, async () => {
+    const result = await checkMailbox(Object.assign({ lastUid: 9 }, baseConfig));
+    assert.equal(result.ok, true, 'error: ' + JSON.stringify(result.error));
+    assert.equal(result.newCount, 3);
+    assert.equal(result.messages[0].subject, '【测试】你好，世界');
+  });
+});
+
+await test('missing UIDNEXT still records the highest UID', async () => {
+  await withServer({ sendUidNext: false }, async () => {
+    const result = await checkMailbox(Object.assign({ lastUid: 0 }, baseConfig));
+    assert.equal(result.ok, true, 'error: ' + JSON.stringify(result.error));
+    assert.equal(result.initial, true);
+    assert.equal(result.newUid, 12);
+    assert.equal(result.uidValidity, 42);
+  });
+});
+
+await test('UIDVALIDITY change resets the baseline without alerting', async () => {
+  await withServer({ uidValidity: 99, uids: [1, 2, 3, 4], uidNext: 5 }, async () => {
+    const result = await checkMailbox(Object.assign({ lastUid: 12, uidValidity: 42 }, baseConfig));
+    assert.equal(result.ok, true, 'error: ' + JSON.stringify(result.error));
+    assert.equal(result.initial, true);
+    assert.equal(result.newCount, 0);
+    assert.equal(result.messages.length, 0);
+    assert.equal(result.newUid, 4);
+    assert.equal(result.uidValidity, 99);
+  });
+});
+
+await test('a stalled command fails with err.timeout instead of hanging', async () => {
+  await withServer({ hangCommand: 'SELECT' }, async () => {
+    const result = await Promise.race([
+      checkMailbox(Object.assign({ lastUid: 5, timeout: 400 }, baseConfig)),
+      new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: { code: 'hung' } }), 2000)),
+    ]);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'err.timeout');
+  });
+});
+
+await test('an oversized literal is rejected without buffering it', async () => {
+  await withServer({ hugeLiteral: true }, async () => {
+    const started = Date.now();
+    const result = await checkMailbox(Object.assign({ lastUid: 9, timeout: 2000 }, baseConfig));
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, 'err.server');
+    assert.ok(Date.now() - started < 1500, 'oversized literal took too long');
+  });
+});
+
+await test('newline and NUL credentials are rejected before they are sent', async () => {
+  requests.length = 0;
+  const result = await checkMailbox(Object.assign({}, baseConfig, { secret: 'bad\r\nLOGIN injected' }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'err.invalid');
+  assert.equal(requests.some((line) => line.includes('injected')), false);
+
+  requests.length = 0;
+  const nulled = await checkMailbox(Object.assign({}, baseConfig, { secret: 'bad\0code' }));
+  assert.equal(nulled.ok, false);
+  assert.equal(nulled.error.code, 'err.invalid');
+  assert.equal(requests.some((line) => line.includes('bad')), false);
+});
+
+await test('a host with a header injection is rejected before connect', async () => {
+  const result = await checkMailbox(
+    Object.assign({}, baseConfig, { host: 'imap.example.com\r\nX-Injected: 1', port: 1 })
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'err.invalid');
 });
 
 await test('no new mail: newCount is 0 and the UID is unchanged', async () => {

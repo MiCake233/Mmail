@@ -15,6 +15,8 @@ const net = require('node:net');
 const tls = require('node:tls');
 
 const TIMEOUT_MS = 20000;
+/** Header fetches are small. Anything larger is treated as a hostile response. */
+const MAX_LITERAL = 1024 * 1024;
 
 /** Debugging: set MMAIL_IMAP_DEBUG=1 to log the IMAP conversation to stderr */
 const DEBUG = process.env.MMAIL_IMAP_DEBUG === '1';
@@ -30,7 +32,8 @@ class ImapError extends Error {
 
 function quote(value) {
   const text = String(value == null ? '' : value);
-  if (/[\r\n]/.test(text)) throw new ImapError('err.invalid');
+  /* CR, LF and NUL break out of an IMAP quoted string or truncate the command. */
+  if (/[\0\r\n]/.test(text)) throw new ImapError('err.invalid');
   return '"' + text.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
@@ -56,6 +59,42 @@ function detailOf(result) {
 /* Proxy transports                                                         */
 /* ------------------------------------------------------------------------- */
 
+/** Node includes brackets in URL.hostname for IPv6; net.connect rejects that form. */
+function bareHost(host) {
+  const value = String(host || '');
+  if (value.startsWith('[') && value.endsWith(']') && value.includes(':')) return value.slice(1, -1);
+  return value;
+}
+
+function isValidPort(port) {
+  const number = Number(port);
+  return Number.isInteger(number) && number >= 1 && number <= 65535;
+}
+
+/**
+ * Hosts that are safe to interpolate into IMAP commands and HTTP CONNECT.
+ * Control characters and delimiters are rejected so a pasted value cannot
+ * inject a second header or command.
+ */
+function isValidHost(host) {
+  const value = bareHost(String(host || '').trim());
+  if (!value || value.length > 253) return false;
+  if (/[\0-\x1f\x7f\s/?#\\@]/.test(value)) return false;
+  if (net.isIP(value)) return true;
+  return /^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)(?:\.(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?))*$/.test(
+    value
+  );
+}
+
+function decodeUserinfo(value) {
+  const text = String(value || '');
+  try {
+    return decodeURIComponent(text);
+  } catch (err) {
+    return text;
+  }
+}
+
 /**
  * Parse proxy URLs such as socks5://127.0.0.1:7890 or http://proxy:8080.
  * Returns null when the value is empty or unsupported.
@@ -65,15 +104,42 @@ function parseProxy(raw) {
   try {
     const url = new URL(String(raw));
     if (url.protocol !== 'socks5:' && url.protocol !== 'socks5h:' && url.protocol !== 'http:') return null;
+    const host = bareHost(url.hostname);
+    const port = Number(url.port) || (url.protocol === 'http:' ? 8080 : 1080);
+    if (!isValidHost(host) || !isValidPort(port)) return null;
     return {
       type: url.protocol === 'http:' ? 'http' : 'socks5',
-      host: url.hostname,
-      port: Number(url.port) || (url.protocol === 'http:' ? 8080 : 1080),
-      username: decodeURIComponent(url.username || ''),
-      password: decodeURIComponent(url.password || ''),
+      host: host,
+      port: port,
+      username: decodeUserinfo(url.username),
+      password: decodeUserinfo(url.password),
     };
   } catch (err) {
     return null;
+  }
+}
+
+/** Chromium proxy rules need brackets around IPv6 literals. */
+function formatProxyRule(parsed) {
+  if (!parsed || !parsed.host || !isValidPort(parsed.port)) return '';
+  const host = net.isIP(parsed.host) === 6 ? '[' + parsed.host + ']' : parsed.host;
+  const scheme = parsed.type === 'socks5' ? 'socks5' : 'http';
+  return scheme + '://' + host + ':' + parsed.port;
+}
+
+/** Drop userinfo before a proxy URL is copied into diagnostics. */
+function redactProxyUrl(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    if (url.username || url.password) {
+      url.username = '***';
+      url.password = '***';
+    }
+    return url.toString();
+  } catch (err) {
+    return '(invalid)';
   }
 }
 
@@ -140,8 +206,10 @@ async function socks5Connect(socket, reader, host, port, proxy) {
   const method = greeting[1];
 
   if (method === 0x02) {
-    const user = Buffer.from(proxy.username, 'utf8');
-    const pass = Buffer.from(proxy.password, 'utf8');
+    const user = Buffer.from(proxy.username || '', 'utf8');
+    const pass = Buffer.from(proxy.password || '', 'utf8');
+    /* RFC 1929 lengths are a single byte. Truncating them would send a forged handshake. */
+    if (user.length > 255 || pass.length > 255) throw new ImapError('err.proxy', 'credentials too long');
     socket.write(Buffer.concat([Buffer.from([0x01, user.length]), user, Buffer.from([pass.length]), pass]));
     const reply = await reader.read(2);
     if (reply[1] !== 0x00) throw new ImapError('err.proxy', 'socks authentication failed');
@@ -150,6 +218,7 @@ async function socks5Connect(socket, reader, host, port, proxy) {
   }
 
   const hostBytes = Buffer.from(host, 'utf8');
+  if (hostBytes.length === 0 || hostBytes.length > 255) throw new ImapError('err.proxy', 'host too long');
   const portBytes = Buffer.from([(port >> 8) & 0xff, port & 0xff]);
   socket.write(Buffer.concat([Buffer.from([0x05, 0x01, 0x00, 0x03, hostBytes.length]), hostBytes, portBytes]));
 
@@ -197,13 +266,14 @@ async function httpConnect(socket, reader, host, port, proxy) {
   }
 }
 
-function openProxySocket(host, port, proxy) {
+function openProxySocket(host, port, proxy, timeoutMs) {
   return new Promise((resolve, reject) => {
+    const limit = timeoutMs || TIMEOUT_MS;
     const socket = net.connect({ host: proxy ? proxy.host : host, port: proxy ? proxy.port : port });
     const timer = setTimeout(() => {
       socket.destroy();
       reject(new ImapError('err.timeout'));
-    }, TIMEOUT_MS);
+    }, limit);
 
     socket.once('error', (err) => {
       clearTimeout(timer);
@@ -234,10 +304,11 @@ function openProxySocket(host, port, proxy) {
 
 class ImapClient {
   constructor(options) {
-    this.host = options.host;
+    this.host = bareHost(options.host);
     this.port = Number(options.port) || 993;
     this.secure = options.secure !== false;
     this.proxy = options.proxy || null;
+    this.timeoutMs = Number(options.timeout) > 0 ? Number(options.timeout) : TIMEOUT_MS;
 
     this.socket = null;
     this.buffer = Buffer.alloc(0);
@@ -263,18 +334,27 @@ class ImapClient {
   /* ---------- Connection ---------- */
 
   async connect() {
+    if (!isValidHost(this.host) || !isValidPort(this.port)) {
+      this.failure = new ImapError('err.invalid');
+      throw this.failure;
+    }
+    if (this.proxy && (!isValidHost(this.proxy.host) || !isValidPort(this.proxy.port))) {
+      this.failure = new ImapError('err.proxy', 'invalid proxy');
+      throw this.failure;
+    }
+
     let raw;
     try {
-      raw = await openProxySocket(this.host, this.port, this.proxy);
+      raw = await openProxySocket(this.host, this.port, this.proxy, this.timeoutMs);
     } catch (err) {
-      this.failure = translate(err);
+      this.failure = err instanceof ImapError ? err : translate(err);
       throw this.failure;
     }
 
     const socket = this.secure ? tls.connect({ socket: raw, servername: this.host }) : raw;
     this.socket = socket;
     socket.setNoDelay(true);
-    socket.setTimeout(TIMEOUT_MS);
+    socket.setTimeout(this.timeoutMs);
 
     return new Promise((resolve, reject) => {
       const onError = (err) => {
@@ -282,31 +362,35 @@ class ImapClient {
         this.failure = error;
         reject(error);
       };
-      socket.once('error', onError);
-      socket.once('timeout', () => {
+      /* Handshake-only. If this listener stays attached it sets failure and
+         destroys the socket without settling the in-flight command, and every
+         later check stays stuck behind the checking flag. */
+      const onConnectTimeout = () => {
         const error = new ImapError('err.timeout');
         this.failure = error;
-        socket.destroy();
+        try {
+          socket.destroy();
+        } catch (err) {
+          /* ignore */
+        }
         reject(error);
-      });
+      };
+      socket.once('error', onError);
+      socket.once('timeout', onConnectTimeout);
 
       const attach = () => {
         socket.removeListener('error', onError);
+        socket.removeListener('timeout', onConnectTimeout);
         socket.on('error', (err) => this.fail(translate(err)));
         socket.on('close', () => this.fail(new ImapError('err.network')));
         socket.on('timeout', () => {
           this.fail(new ImapError('err.timeout'));
-          try {
-            socket.destroy();
-          } catch (err) {
-            /* ignore */
-          }
         });
         socket.on('data', (chunk) => this.onData(chunk));
 
         this.greetingTimer = setTimeout(() => {
           this.fail(new ImapError('err.timeout'));
-        }, TIMEOUT_MS);
+        }, this.timeoutMs);
 
         this.greetingPromise.then(resolve, reject);
       };
@@ -333,6 +417,10 @@ class ImapClient {
       const literal = /\{(\d+)\+?\}$/.exec(lineBuffer.toString('latin1'));
       if (literal) {
         const size = Number(literal[1]);
+        if (!Number.isFinite(size) || size > MAX_LITERAL) {
+          this.fail(new ImapError('err.server', 'response too large'));
+          return;
+        }
         if (this.buffer.length < index + 2 + size) return; // literal not fully buffered yet
         const chunk = this.buffer.subarray(index + 2, index + 2 + size);
         this.buffer = this.buffer.subarray(index + 2 + size);
@@ -394,17 +482,19 @@ class ImapClient {
   }
 
   fail(error) {
-    if (this.failure) return;
-    this.failure = error;
+    /* Always settle an in-flight command. A previous path may already have
+       recorded this.failure (the connect timeout did) and must not leave the
+       caller awaiting forever. */
     const pending = this.pending;
     this.pending = null;
+    if (!this.failure) this.failure = error || new ImapError('err.network');
     if (pending) {
       clearTimeout(pending.timer);
-      pending.reject(error);
+      pending.reject(this.failure);
     }
-    if (this.greetingPending) this.finishGreeting(error);
+    if (this.greetingPending) this.finishGreeting(this.failure);
     try {
-      if (this.socket) this.socket.destroy();
+      if (this.socket && !this.socket.destroyed) this.socket.destroy();
     } catch (err) {
       /* ignore */
     }
@@ -419,7 +509,7 @@ class ImapClient {
       const pending = { tag, lines: [], literals: [], resolve, reject, timer: null };
       pending.timer = setTimeout(() => {
         this.fail(new ImapError('err.timeout'));
-      }, TIMEOUT_MS);
+      }, this.timeoutMs);
       this.pending = pending;
       try {
         if (DEBUG) console.error('[imap>] ' + tag + ' ' + text);
@@ -502,6 +592,22 @@ class ImapClient {
     return this.search('UNSEEN');
   }
 
+  /**
+   * Highest UID in the mailbox. UIDNEXT is optional; when the server omits it,
+   * ask for the last message instead of treating the mailbox as empty.
+   */
+  async highestUid(box) {
+    if (box && Number(box.uidNext) > 0) return Math.max(0, Number(box.uidNext) - 1);
+    const result = await this.command('UID FETCH * (UID)');
+    if (result.status !== 'OK') throw new ImapError('err.imap', detailOf(result));
+    let highest = 0;
+    result.lines.forEach((line) => {
+      const match = /\bUID (\d+)/i.exec(line);
+      if (match) highest = Math.max(highest, Number(match[1]));
+    });
+    return highest;
+  }
+
   async fetchHeaders(uids) {
     if (!uids.length) return [];
     const result = await this.command(
@@ -509,18 +615,33 @@ class ImapClient {
     );
     if (result.status !== 'OK') throw new ImapError('err.imap', detailOf(result));
 
+    /* UID is not required to be the first attribute. Servers may place it
+       after the header literal; dropping those responses advanced the cursor
+       and the messages were never announced. */
     const items = [];
+    let current = null;
     let literalIndex = 0;
+    const finish = () => {
+      if (current && current.uid) items.push(current);
+      current = null;
+    };
     result.lines.forEach((line) => {
-      const match = /^\* \d+ FETCH \(UID (\d+)/i.exec(line);
-      if (!match) return;
-      let raw = '';
-      if (/\{\d+\+?\}\s*$/.test(line)) {
-        const literal = result.literals[literalIndex++];
-        raw = literal ? literal.toString('latin1') : '';
+      if (/^\* \d+ FETCH \(/i.test(line)) {
+        finish();
+        const uidMatch = /\bUID (\d+)/i.exec(line);
+        current = { uid: uidMatch ? Number(uidMatch[1]) : 0, raw: '' };
+        if (/\{\d+\+?\}\s*$/.test(line)) {
+          const literal = result.literals[literalIndex];
+          literalIndex += 1;
+          current.raw = literal ? literal.toString('latin1') : '';
+        }
+        return;
       }
-      items.push({ uid: Number(match[1]), raw });
+      if (!current || current.uid) return;
+      const uidMatch = /\bUID (\d+)/i.exec(line);
+      if (uidMatch) current.uid = Number(uidMatch[1]);
     });
+    finish();
     return items;
   }
 
@@ -686,6 +807,9 @@ module.exports = {
   ImapClient,
   ImapError,
   parseProxy,
+  formatProxyRule,
+  redactProxyUrl,
+  isValidHost,
   probe,
   parseHeaders,
   decodeWords,
