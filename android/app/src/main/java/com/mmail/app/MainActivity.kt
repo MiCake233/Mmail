@@ -2,8 +2,11 @@ package com.mmail.app
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.os.Message
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -48,6 +51,10 @@ class MainActivity : AppCompatActivity() {
                 allowFileAccess = false
                 allowContentAccess = false
                 mediaPlaybackRequiresUserGesture = true
+                // Provider links use target=_blank. Without this, WebView drops them
+                // and shouldOverrideUrlLoading never runs.
+                javaScriptCanOpenWindowsAutomatically = true
+                setSupportMultipleWindows(true)
             }
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(
@@ -61,8 +68,49 @@ class MainActivity : AppCompatActivity() {
                 ): Boolean {
                     val url = request.url
                     if (url.host == APP_HOST) return false
-                    // 站外链接（官方登录页）一律交给系统浏览器
-                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }
+                    openExternal(url)
+                    return true
+                }
+            }
+            webChromeClient = object : WebChromeClient() {
+                override fun onCreateWindow(
+                    view: WebView,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: Message
+                ): Boolean {
+                    if (!isUserGesture) return false
+                    val extra = view.hitTestResult?.extra
+                    if (!extra.isNullOrEmpty()) {
+                        val uri = Uri.parse(extra)
+                        if (uri.host == APP_HOST) {
+                            view.loadUrl(uri.toString())
+                        } else {
+                            openExternal(uri)
+                        }
+                        return false
+                    }
+                    val popup = WebView(view.context)
+                    popup.settings.javaScriptEnabled = false
+                    popup.settings.allowFileAccess = false
+                    popup.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            popupView: WebView,
+                            request: WebResourceRequest
+                        ): Boolean {
+                            val url = request.url
+                            if (url.host == APP_HOST) view.loadUrl(url.toString()) else openExternal(url)
+                            popupView.destroy()
+                            return true
+                        }
+                    }
+                    val transport = resultMsg.obj as? WebView.WebViewTransport
+                    if (transport == null) {
+                        popup.destroy()
+                        return false
+                    }
+                    transport.webView = popup
+                    resultMsg.sendToTarget()
                     return true
                 }
             }
@@ -81,6 +129,12 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         webView.destroy()
         super.onDestroy()
+    }
+
+    private fun openExternal(uri: Uri) {
+        val scheme = uri.scheme?.lowercase() ?: return
+        if (scheme != "http" && scheme != "https") return
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
     }
 
     private companion object {

@@ -35,7 +35,8 @@ const {
 
 const { Store, MAX_ACCOUNTS } = require('./store');
 const { checkMailbox } = require('./mailcheck');
-const { probe, parseProxy } = require('./imap');
+const { probe, parseProxy, formatProxyRule, redactProxyUrl, isValidHost } = require('./imap');
+const { normalizeClock } = require('./clock');
 const { NOTIFY, TRAY, fill } = require('./strings');
 
 const ASSETS = path.join(__dirname, '..', 'assets');
@@ -155,15 +156,8 @@ function resolvedProxy() {
 
 function applyElectronProxy() {
   const resolved = resolvedProxy();
-  const config = resolved.parsed
-    ? {
-        proxyRules:
-          (resolved.parsed.type === 'socks5' ? 'socks5://' : 'http://') +
-          resolved.parsed.host +
-          ':' +
-          resolved.parsed.port,
-      }
-    : { mode: 'direct' };
+  const rule = formatProxyRule(resolved.parsed);
+  const config = rule ? { proxyRules: rule } : { mode: 'direct' };
   try {
     session.defaultSession.setProxy(config);
     session.fromPartition(BROWSER_PARTITION).setProxy(config);
@@ -293,8 +287,9 @@ function createWindow(hidden) {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
-  if (SHOT_PATH) {
-    /* Development only: screenshots for docs and regression checks; never runs on normal start */
+  if (SHOT_PATH && !app.isPackaged) {
+    /* Unpackaged development builds only. A packaged app ignores these flags so
+       a shortcut cannot execute script in the renderer or write an arbitrary file. */
     win.webContents.once('did-finish-load', async () => {
       await delay(700);
       if (shotExec) {
@@ -490,56 +485,66 @@ async function runCheck(options) {
   let okCount = 0;
   let firstError = null;
 
-  const accounts = store.data.accounts.slice();
-  for (const account of accounts) {
-    const config = await store.connectionOf(account);
-    config.proxy = resolvedProxy().parsed;
-    if (!config.secret) {
-      firstError = firstError || { code: 'err.auth' };
-      continue;
-    }
-
-    const result = await checkMailbox(config);
-    const at = Date.now();
-
-    if (result.ok) {
-      okCount += 1;
-      store.updateAccount(account.id, {
-        lastUid: result.newUid,
-        lastCheck: { at: at, ok: true, unread: result.unread, error: null },
-      });
-      if (result.newCount > 0) {
-        totalNew += result.newCount;
-        notifyNewMail(account, result.messages);
+  try {
+    const accounts = store.data.accounts.slice();
+    for (const account of accounts) {
+      const config = withProxy(await store.connectionOf(account));
+      if (!config.secret) {
+        firstError = firstError || { code: 'err.auth' };
+        continue;
       }
-    } else {
-      firstError = firstError || result.error;
-      store.updateAccount(account.id, {
-        lastCheck: { at: at, ok: false, unread: 0, error: result.error },
-      });
-    }
-  }
 
-  checking = false;
-  lastCheck = {
-    at: Date.now(),
-    newCount: totalNew,
-    ok: okCount > 0 || accounts.length === 0,
-    error: firstError,
-  };
-  broadcast();
-  updateBadge(totalUnread());
+      const result = await checkMailbox(config);
+      const at = Date.now();
+
+      if (result.ok) {
+        okCount += 1;
+        store.updateAccount(account.id, {
+          lastUid: result.newUid,
+          uidValidity: result.uidValidity || account.uidValidity || 0,
+          lastCheck: { at: at, ok: true, unread: result.unread, error: null },
+        });
+        if (result.newCount > 0) {
+          totalNew += result.newCount;
+          notifyNewMail(account, result.messages, result.newCount);
+        }
+      } else {
+        firstError = firstError || result.error;
+        store.updateAccount(account.id, {
+          lastCheck: { at: at, ok: false, unread: 0, error: result.error },
+        });
+      }
+    }
+
+    lastCheck = {
+      at: Date.now(),
+      newCount: totalNew,
+      ok: okCount > 0 || accounts.length === 0,
+      error: firstError,
+    };
+  } catch (err) {
+    lastCheck = {
+      at: Date.now(),
+      newCount: totalNew,
+      ok: false,
+      error: { code: 'err.unknown', detail: String((err && err.message) || err).slice(0, 160) },
+    };
+  } finally {
+    checking = false;
+    broadcast();
+    updateBadge(totalUnread());
+  }
   return snapshot();
 }
 
-function notifyNewMail(account, messages) {
+function notifyNewMail(account, messages, total) {
   if (!Notification.isSupported()) return;
   if (account.notify === false) return;
   if (inQuietHours(new Date())) return;
 
   const lang = store.data.ui.lang === 'en' ? 'en' : 'zh';
   const strings = NOTIFY[lang];
-  const count = messages.length;
+  const count = Number(total) || messages.length;
   const name = providerName(account.providerId, lang) || account.email;
 
   const title = fill(count === 1 ? strings.titleOne : strings.title, { name: name, count: count });
@@ -576,18 +581,23 @@ function notifyNewMail(account, messages) {
 
 function validatePayload(payload) {
   const input = payload || {};
+  const port = Number(input.port) || 993;
   const value = {
     providerId: String(input.providerId || ''),
     email: String(input.email || '').trim(),
     secret: String(input.secret || ''),
     host: String(input.host || '').trim(),
-    port: Number(input.port) || 993,
+    port: port,
     secure: input.secure !== false,
   };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) return { error: { code: 'err.invalid' } };
-  if (!value.secret || !value.host) return { error: { code: 'err.invalid' } };
-  if (!(value.port > 0 && value.port < 65536)) return { error: { code: 'err.invalid' } };
+  if (!value.secret || !isValidHost(value.host)) return { error: { code: 'err.invalid' } };
+  if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) return { error: { code: 'err.invalid' } };
   return { value: value };
+}
+
+function withProxy(config) {
+  return Object.assign({}, config, { proxy: resolvedProxy().parsed });
 }
 
 /* ------------------------------------------------------------------------- */
@@ -595,6 +605,46 @@ function validatePayload(payload) {
 /* ------------------------------------------------------------------------- */
 
 const BROWSER_PARTITION = 'persist:mmail-browser';
+
+function isSafeWebUrl(rawUrl) {
+  try {
+    const url = new URL(String(rawUrl));
+    if (url.protocol === 'http:' || url.protocol === 'https:') return true;
+    return url.protocol === 'about:' && url.pathname === 'blank';
+  } catch (err) {
+    return false;
+  }
+}
+
+function browserWindowOptions() {
+  return {
+    autoHideMenuBar: true,
+    webPreferences: {
+      partition: BROWSER_PARTITION,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  };
+}
+
+/** Popups and navigations stay on http(s). file:, javascript: and custom schemes are denied. */
+function hardenWebContents(contents) {
+  const rejectNavigation = (event, url) => {
+    if (!isSafeWebUrl(url)) event.preventDefault();
+  };
+  contents.on('will-navigate', rejectNavigation);
+  contents.on('will-redirect', rejectNavigation);
+  contents.setPermissionRequestHandler((requesting, permission, callback) => callback(false));
+  contents.session.setPermissionRequestHandler((requesting, permission, callback) => callback(false));
+  contents.setWindowOpenHandler(({ url }) => {
+    if (!isSafeWebUrl(url)) return { action: 'deny' };
+    return { action: 'allow', overrideBrowserWindowOptions: browserWindowOptions() };
+  });
+  contents.on('did-create-window', (child) => {
+    if (child && child.webContents && !child.webContents.isDestroyed()) hardenWebContents(child.webContents);
+  });
+}
 
 let browserView = null;
 
@@ -672,22 +722,8 @@ function ensureBrowserView() {
 
   const contents = browserView.webContents;
 
-  /* OAuth and "open in new tab" flows rely on window.open; let Electron create
-     real child windows that reuse the same session. */
-  contents.setWindowOpenHandler(() => ({
-    action: 'allow',
-    overrideBrowserWindowOptions: {
-      autoHideMenuBar: true,
-      webPreferences: {
-        partition: BROWSER_PARTITION,
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-      },
-    },
-  }));
-
-  contents.session.setPermissionRequestHandler((requesting, permission, callback) => callback(false));
+  /* OAuth popups still open real windows, but only for http(s) and about:blank. */
+  hardenWebContents(contents);
 
   ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'did-fail-load'].forEach(
     (event) => contents.on(event, () => pushBrowserState())
@@ -797,7 +833,7 @@ function diagnosticsText() {
   lines.push(
     'versions: electron ' + process.versions.electron + ', chromium ' + process.versions.chrome + ', node ' + process.versions.node
   );
-  lines.push('proxy: ' + proxy.mode + (proxy.url ? ' (' + proxy.url + ')' : ''));
+  lines.push('proxy: ' + proxy.mode + (proxy.url ? ' (' + redactProxyUrl(proxy.url) + ')' : ''));
   lines.push(
     'alerts: enabled=' +
       Boolean(store.data.mail.enabled) +
@@ -849,8 +885,8 @@ function registerIpc() {
         store.setMail({
           quietHours: {
             enabled: Boolean(value && value.enabled),
-            start: String((value && value.start) || '22:00'),
-            end: String((value && value.end) || '08:00'),
+            start: normalizeClock(value && value.start, '22:00'),
+            end: normalizeClock(value && value.end, '08:00'),
           },
         });
         break;
@@ -877,7 +913,7 @@ function registerIpc() {
   ipcMain.handle('mail:test-account', async (event, payload) => {
     const validated = validatePayload(payload);
     if (validated.error) return { ok: false, error: validated.error };
-    const result = await probe(validated.value);
+    const result = await probe(withProxy(validated.value));
     return result.ok ? { ok: true, unread: result.unread } : { ok: false, error: result.error };
   });
 
@@ -893,12 +929,13 @@ function registerIpc() {
     if (duplicated) return { ok: false, error: { code: 'err.duplicate' } };
 
     /* Connect once before persisting so broken accounts never enter the list */
-    const result = await checkMailbox(Object.assign({ lastUid: 0 }, validated.value));
+    const result = await checkMailbox(withProxy(Object.assign({ lastUid: 0 }, validated.value)));
     if (!result.ok) return { ok: false, error: result.error };
 
     const account = await store.addAccount(validated.value);
     store.updateAccount(account.id, {
       lastUid: result.newUid,
+      uidValidity: result.uidValidity || 0,
       lastCheck: { at: Date.now(), ok: true, unread: result.unread, error: null },
     });
 
@@ -952,7 +989,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('browser:open', (event, url, bounds) => {
-    if (!isExternalUrl(url)) return { open: false };
+    if (!isSafeWebUrl(url)) return { open: false };
     return openInAppBrowser(url, bounds);
   });
 
@@ -976,7 +1013,7 @@ function registerIpc() {
     else if (action === 'stop') contents.stop();
     else if (action === 'external') {
       const current = contents.getURL();
-      if (isExternalUrl(current)) shell.openExternal(current);
+      if (isSafeWebUrl(current)) shell.openExternal(current);
     }
     return browserState();
   });

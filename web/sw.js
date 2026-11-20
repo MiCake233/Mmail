@@ -7,13 +7,14 @@
  * Bump CACHE when shipping changes, otherwise clients keep the old shell.
  */
 
-const CACHE = 'mmail-shell-v2';
+const CACHE = 'mmail-shell-v3';
 
 const SHELL = [
   './',
   './index.html',
   './src/styles.css',
   './src/providers.js',
+  './src/locales.js',
   './src/i18n.js',
   './src/app.js',
   './assets/icon-192.png',

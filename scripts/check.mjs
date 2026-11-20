@@ -68,6 +68,7 @@ const scripts = [
   'electron/imap.js',
   'electron/mailcheck.js',
   'electron/strings.js',
+  'electron/clock.js',
 ];
 
 scripts.forEach((file) => {
@@ -220,6 +221,7 @@ const MAIN_PROCESS_KEYS = new Set([
   'err.invalid',
   'err.limit',
   'err.duplicate',
+  'err.proxy',
 ]);
 
 const unusedKeys = zhKeys.filter((key) => !usedKeys.has(key) && !MAIN_PROCESS_KEYS.has(key));
@@ -285,6 +287,16 @@ if (html) {
     if (!exists(file)) fail('service worker caches a missing file · ' + file);
   });
 
+  const shellSource = read('web/sw.js');
+  const pageAssets = new Set();
+  for (const match of html.matchAll(/(?:src|href)="(\.\/[^"?#]+)"/g)) {
+    if (/\.(?:js|css|png|webmanifest|html)$/.test(match[1])) pageAssets.add(match[1]);
+  }
+  pageAssets.forEach((asset) => {
+    if (!shellSource.includes("'" + asset + "'")) fail('service worker shell is missing ' + asset);
+  });
+  if (pageAssets.size > 0 && problems.length === 0) ok('service worker: shell covers the page assets');
+
   const order = ['src/providers.js', 'src/locales.js', 'src/i18n.js', 'src/app.js'];
   let cursor = -1;
   order.forEach((name) => {
@@ -331,6 +343,7 @@ const COMMENT_FILES = [
   'electron/mailcheck.js',
   'electron/store.js',
   'electron/preload.js',
+  'electron/clock.js',
   'scripts/check.mjs',
   'scripts/serve.mjs',
   'scripts/test-imap.mjs',
