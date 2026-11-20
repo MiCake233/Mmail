@@ -7,6 +7,12 @@ on:
       - 'android/**'
       - 'web/**'
       - '.github/workflows/android.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'web/**'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 jobs:
